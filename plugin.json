@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "chat-groups",
+  "version": "1.0.0",
+  "description": "Mention-aware group conversations for OpenAgent.",
+  "license": "MIT",
+  "repository": "https://github.com/BANG404/openagent-chat-groups",
+  "keywords": ["openagent", "chat-groups", "conversation"],
+  "extensions": {
+    "openagent": {
+      "runtime": "chat-groups",
+      "capabilities": ["chat-groups", "checkpoint"],
+      "message_policies": [
+        {
+          "tag": "chat_group_mention",
+          "user_visible": false,
+          "model_visible": true
+        }
+      ]
+    }
+  }
+}
