@@ -1,0 +1,426 @@
+#!/usr/bin/env node
+
+import { readFileSync } from "node:fs";
+import { context, host } from "./chat-groups-host.mjs";
+import {
+  appendMessage,
+  dataRoot,
+  groupFor,
+  loadState,
+  membersFor,
+  memberFor,
+  messagesFor,
+  newGroup,
+  newMember,
+  newMessage,
+  saveState,
+} from "./chat-groups-state.mjs";
+
+const PROTOCOL_VERSION = "2024-11-05";
+const root = dataRoot();
+let mutation = Promise.resolve();
+
+const TOOLS = [
+  {
+    name: "chat_group_list",
+    description: "List collaboration groups in the requested workspace.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { workspace: { type: "string" } },
+    },
+  },
+  {
+    name: "chat_group_start",
+    description:
+      "Create a collaboration group and record its first message. Saved roles are kept as a wake roster and are materialized only when a later message targets them.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["title", "content"],
+      properties: {
+        title: { type: "string" },
+        roles: { type: "array", items: { type: "string" } },
+        content: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "chat_group_create",
+    description: "Create a durable collaboration group without sending a message.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string" } } },
+  },
+  {
+    name: "chat_group_add_member",
+    description: "Add an existing conversation to a collaboration group.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["group_id", "conversation_id"],
+      properties: {
+        group_id: { type: "string" },
+        conversation_id: { type: "string" },
+        role_id: { type: "string" },
+        role_name: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "chat_group_list_members",
+    description: "List conversations currently joined to a collaboration group.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["group_id"], properties: { group_id: { type: "string" } } },
+  },
+  {
+    name: "chat_group_send_message",
+    description:
+      "Record a group message. Agent messages wake only member ids in mentions; the special all value wakes every other member. User messages also resolve @role names.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["group_id", "content"],
+      properties: {
+        group_id: { type: "string" },
+        content: { type: "string" },
+        mentions: { type: "array", items: { type: "string" } },
+      },
+    },
+  },
+  {
+    name: "chat_group_read_messages",
+    description: "Read durable group messages incrementally.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["group_id"],
+      properties: {
+        group_id: { type: "string" },
+        from_seq: { type: "integer", minimum: 0 },
+        wait_secs: { type: "integer", minimum: 0, maximum: 60 },
+        limit: { type: "integer", minimum: 1, maximum: 200 },
+      },
+    },
+  },
+  {
+    name: "chat_send_message",
+    description: "Send a private message to an existing conversation.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["conversation_id", "content"],
+      properties: { conversation_id: { type: "string" }, content: { type: "string" } },
+    },
+  },
+];
+
+function runMutation(fn) {
+  const previous = mutation;
+  let release;
+  mutation = new Promise((resolve) => { release = resolve; });
+  return previous.then(fn).finally(() => release());
+}
+
+function emit(name, payload) {
+  void host("event.emit", { name, payload }).catch(() => {});
+}
+
+async function roles(workspace) {
+  return (await host("roles.list", { workspace })) ?? [];
+}
+
+async function roleByName(name, workspace) {
+  const wanted = String(name).trim().toLocaleLowerCase();
+  return (await roles(workspace)).find((role) => String(role.name ?? "").toLocaleLowerCase() === wanted);
+}
+
+async function roleById(id, workspace) {
+  return (await roles(workspace)).find((role) => String(role.id ?? "") === String(id));
+}
+
+async function ensureMemberFromConversation(state, groupId, conversationId, workspace) {
+  let member = state.members.find((candidate) => candidate.group_id === groupId && candidate.conversation_id === conversationId);
+  if (member) return member;
+  const detail = await host("conversation.state", { conv_id: conversationId });
+  if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
+  const role = detail.role_id ? await roleById(detail.role_id, workspace) : null;
+  member = newMember(groupId, conversationId, detail.role_id ?? null, role?.name ?? detail.title ?? "role", detail.branch_id ?? null);
+  state.members.push(member);
+  return member;
+}
+
+async function materializeRoster(state, group, requested, workspace) {
+  const roster = state.rosters[group.id] ?? [];
+  const wanted = requested.includes("all") ? roster.map((item) => item.role_name) : requested;
+  for (const name of wanted) {
+    const role = roster.find((item) => item.role_name.toLocaleLowerCase() === String(name).toLocaleLowerCase());
+    if (!role) continue;
+    if (state.members.some((member) => member.group_id === group.id && member.role_id === role.role_id)) continue;
+    const created = await host("conversation.create", {
+      title: `${group.title}: ${role.role_name}`,
+      workspace,
+      parent_conv_id: group.id,
+      role_id: role.role_id,
+    });
+    state.members.push(newMember(group.id, created.conv_id, role.role_id, role.role_name, created.branch_id));
+  }
+}
+
+function resolveMentions(state, group, requested, userContent) {
+  const members = membersFor(state, group.id);
+  const result = [];
+  const push = (id) => { if (!result.includes(id)) result.push(id); };
+  for (const value of requested) {
+    if (value === "all") {
+      for (const member of members) push(member.id);
+    } else if (members.some((member) => member.id === value)) {
+      push(value);
+    } else {
+      const byName = members.find((member) => member.role_name.toLocaleLowerCase() === String(value).toLocaleLowerCase());
+      if (byName) push(byName.id);
+    }
+  }
+  if (userContent) {
+    for (const match of userContent.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)) {
+      const name = (match[1] ?? match[2] ?? "").trim().toLocaleLowerCase();
+      const member = members.find((item) => item.role_name.toLocaleLowerCase() === name);
+      if (member) push(member.id);
+    }
+  }
+  return result;
+}
+
+async function ensureBranch(member) {
+  if (member.branch_id) return member.branch_id;
+  const detail = await host("conversation.state", { conv_id: member.conversation_id });
+  member.branch_id = detail.branch_id ?? null;
+  return member.branch_id;
+}
+
+function wakePrompt(group, message) {
+  return [
+    `[chat_group:${group.id} message:${message.id}] You were selected in a Chat Groups message.`,
+    "Read the latest group messages with chat_group_read_messages when context is needed.",
+    "If you have a substantive response, publish one concise reply with chat_group_send_message using this group_id before finishing. The private final answer is not visible in the group.",
+    "Do not create another group or wake additional roles unless the message explicitly asks you to.",
+    "",
+    `Group message:\n${message.content}`,
+  ].join("\n");
+}
+
+async function wakeMember(group, message, member, attempt = 0) {
+  const branchId = await ensureBranch(member);
+  const detail = await host("conversation.state", { conv_id: member.conversation_id });
+  try {
+    await host("agent.submit", {
+      request: {
+        conv_id: member.conversation_id,
+        branch_id: branchId,
+        text: wakePrompt(group, message),
+        parent_checkpoint_id: detail.checkpoint_id ?? null,
+        attachments: [],
+        contexts: [],
+        model_binding: null,
+        user_message_id: null,
+        assistant_message_id: null,
+      },
+    });
+  } catch (error) {
+    const text = String(error?.message ?? error);
+    if (text.includes("already active for this conversation") && attempt < 5) {
+      setTimeout(() => void wakeMember(group, message, member, attempt + 1), 150 * (attempt + 1));
+    } else {
+      emit("chat-group-wake-failed", {
+        group_id: group.id,
+        member_id: member.id,
+        attempts: attempt + 1,
+        error: text,
+      });
+    }
+  }
+}
+
+async function createGroup(args) {
+  const { workspace } = context(args);
+  const title = String(args.title ?? "").trim();
+  if (!title) throw new Error("title is empty");
+  const state = loadState(root);
+  const group = newGroup(workspace, title);
+  state.groups.push(group);
+  saveState(root, state);
+  emit("chat-group-updated", group);
+  return group;
+}
+
+async function listGroups(args) {
+  const { workspace } = context(args);
+  const state = loadState(root);
+  return state.groups
+    .filter((group) => !workspace || group.workspace === workspace)
+    .sort((a, b) => b.updated_at - a.updated_at || b.id.localeCompare(a.id));
+}
+
+async function addMember(args) {
+  const { workspace } = context(args);
+  const state = loadState(root);
+  const group = groupFor(state, String(args.group_id), workspace);
+  const detail = await host("conversation.state", { conv_id: String(args.conversation_id) });
+  if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
+  const role = args.role_id ? await roleById(args.role_id, workspace) : null;
+  const existing = state.members.find((member) => member.group_id === group.id && member.conversation_id === detail.conv_id);
+  const member = existing ?? newMember(group.id, detail.conv_id, args.role_id ?? detail.role_id ?? null, String(args.role_name ?? role?.name ?? detail.title ?? "role"), detail.branch_id ?? null);
+  if (!existing) state.members.push(member);
+  else Object.assign(existing, member);
+  saveState(root, state);
+  emit("chat-group-member-changed", member);
+  return member;
+}
+
+async function listMembers(args) {
+  const { workspace } = context(args);
+  const state = loadState(root);
+  const group = groupFor(state, String(args.group_id), workspace);
+  const senderIds = new Set(state.messages.filter((message) => message.group_id === group.id && message.sender_type === "conversation" && message.sender_id).map((message) => message.sender_id));
+  for (const senderId of senderIds) await ensureMemberFromConversation(state, group.id, senderId, workspace);
+  saveState(root, state);
+  return membersFor(state, group.id);
+}
+
+async function sendGroupMessage(args) {
+  const { conversationId, workspace } = context(args);
+  const state = loadState(root);
+  const group = groupFor(state, String(args.group_id), workspace);
+  const content = String(args.content ?? "").trim();
+  if (!content) throw new Error("content is empty");
+  if (conversationId) await ensureMemberFromConversation(state, group.id, conversationId, workspace);
+  const user = !conversationId;
+  const requested = Array.isArray(args.mentions) ? args.mentions.map(String) : [];
+  const targets = resolveMentions(state, group, requested, user ? content : "");
+  await materializeRoster(state, group, targets, workspace);
+  const mentions = resolveMentions(state, group, requested, user ? content : "");
+  const message = appendMessage(state, newMessage(group.id, user ? "user" : "conversation", conversationId, content, mentions));
+  saveState(root, state);
+  emit("chat-group-message", message);
+  const members = membersFor(state, group.id);
+  for (const id of mentions) {
+    const member = members.find((candidate) => candidate.id === id);
+    if (!member || member.conversation_id === conversationId) continue;
+    void wakeMember(group, message, member);
+  }
+  return message;
+}
+
+async function readMessages(args) {
+  const { workspace } = context(args);
+  const state = loadState(root);
+  groupFor(state, String(args.group_id), workspace);
+  const fromSeq = Math.max(0, Number(args.from_seq ?? 0));
+  const limit = Math.max(1, Math.min(200, Number(args.limit ?? 50)));
+  const waitSecs = Math.max(0, Math.min(60, Number(args.wait_secs ?? 10)));
+  const deadline = Date.now() + waitSecs * 1000;
+  let messages = messagesFor(state, String(args.group_id), fromSeq, limit);
+  while (messages.length === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    messages = messagesFor(loadState(root), String(args.group_id), fromSeq, limit);
+  }
+  return { messages, next_seq: messages.at(-1)?.seq ?? fromSeq, temporary: waitSecs > 0 };
+}
+
+async function startGroup(args) {
+  const { workspace } = context(args);
+  const title = String(args.title ?? "").trim();
+  const content = String(args.content ?? "").trim();
+  if (!title || !content) throw new Error("title and content are required");
+  const roleNames = [...new Set((Array.isArray(args.roles) ? args.roles : []).map((name) => String(name).trim()).filter(Boolean))];
+  const available = await roles(workspace);
+  const roster = roleNames.map((name) => {
+    const role = available.find((item) => String(item.name ?? "").toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (!role) throw new Error(`Unknown role '${name}'`);
+    return { role_id: role.id, role_name: role.name };
+  });
+  const group = await createGroup({ ...args, title, _openagent: args._openagent });
+  const state = loadState(root);
+  state.rosters[group.id] = roster;
+  saveState(root, state);
+  const message = await sendGroupMessage({ ...args, group_id: group.id, content, mentions: [], _openagent: args._openagent });
+  return { group, members: await listMembers({ group_id: group.id, _openagent: args._openagent }), message };
+}
+
+async function sendPrivate(args) {
+  const { workspace } = context(args);
+  const conversationId = String(args.conversation_id ?? "").trim();
+  const content = String(args.content ?? "").trim();
+  if (!conversationId || !content) throw new Error("conversation_id and content are required");
+  const detail = await host("conversation.state", { conv_id: conversationId });
+  if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
+  await host("agent.submit", {
+    request: {
+      conv_id: conversationId,
+      branch_id: detail.branch_id ?? null,
+      text: content,
+      parent_checkpoint_id: detail.checkpoint_id ?? null,
+      attachments: [],
+      contexts: [],
+      model_binding: null,
+      user_message_id: null,
+      assistant_message_id: null,
+    },
+  });
+  return { conversation_id: conversationId, accepted: true };
+}
+
+async function callTool(name, args) {
+  return runMutation(async () => {
+    if (name === "chat_group_list") return listGroups(args);
+    if (name === "chat_group_start") return startGroup(args);
+    if (name === "chat_group_create") return createGroup(args);
+    if (name === "chat_group_add_member") return addMember(args);
+    if (name === "chat_group_list_members") return listMembers(args);
+    if (name === "chat_group_send_message") return sendGroupMessage(args);
+    if (name === "chat_group_read_messages") return readMessages(args);
+    if (name === "chat_send_message") return sendPrivate(args);
+    throw new Error(`Unknown tool: ${name}`);
+  });
+}
+
+function send(message) { process.stdout.write(`${JSON.stringify(message)}\n`); }
+function reply(id, value, isError = false) {
+  send({
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{ type: "text", text: isError ? String(value) : JSON.stringify(value) }],
+      isError,
+    },
+  });
+}
+
+function handle(message) {
+  const { id, method, params } = message;
+  if (method === "initialize") {
+    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.0.0" } } });
+    return;
+  }
+  if (method === "notifications/initialized") return;
+  if (method === "ping") { send({ jsonrpc: "2.0", id, result: {} }); return; }
+  if (method === "tools/list") { send({ jsonrpc: "2.0", id, result: { tools: TOOLS } }); return; }
+  if (method === "tools/call") {
+    callTool(params?.name, params?.arguments ?? {}).then((value) => reply(id, value)).catch((error) => reply(id, error?.message ?? error, true));
+    return;
+  }
+  if (id !== undefined) send({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
+}
+
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index = buffer.indexOf("\n");
+  while (index !== -1) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (line) {
+      try { handle(JSON.parse(line)); } catch (error) { process.stderr.write(`chat-groups server: ${error.message}\n`); }
+    }
+    index = buffer.indexOf("\n");
+  }
+});
+process.stdin.on("end", () => process.exit(0));

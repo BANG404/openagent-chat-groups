@@ -9,7 +9,7 @@
   "extensions": {
     "openagent": {
       "runtime": "chat-groups",
-      "capabilities": ["chat-groups", "checkpoint"]
+      "capabilities": ["chat-groups", "checkpoint", "mcp"]
     }
   }
 }
