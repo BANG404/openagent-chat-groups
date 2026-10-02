@@ -208,14 +208,16 @@ function wakePrompt(group, message) {
 
 async function wakeMember(group, message, member, attempt = 0) {
   const branchId = await ensureBranch(member);
-  const detail = await host("conversation.state", { conv_id: member.conversation_id });
   try {
-    await host("agent.submit", {
+    await host("agent.wake", {
       request: {
         conv_id: member.conversation_id,
         branch_id: branchId,
         text: wakePrompt(group, message),
-        parent_checkpoint_id: detail.checkpoint_id ?? null,
+        // Resolve the branch head in the bridge immediately before the
+        // submission. A checkpoint read here would be stale if another turn
+        // finishes while this wake is queued.
+        parent_checkpoint_id: null,
         attachments: [],
         contexts: [],
         model_binding: null,
@@ -356,7 +358,9 @@ async function sendPrivate(args) {
       conv_id: conversationId,
       branch_id: detail.branch_id ?? null,
       text: content,
-      parent_checkpoint_id: detail.checkpoint_id ?? null,
+      // The generic bridge resolves the current branch head at submission
+      // time, so private messages cannot fork from a stale state snapshot.
+      parent_checkpoint_id: null,
       attachments: [],
       contexts: [],
       model_binding: null,

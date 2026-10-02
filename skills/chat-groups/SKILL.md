@@ -5,6 +5,8 @@ description: Use OpenAgent Chat Groups when a conversation needs mention-aware g
 
 # Chat Groups
 
-Chat Groups is provided by the OpenAgent Runtime through the `chat-groups`
-plugin binding. Keep group operations in the Runtime tool surface so durable
-group state, role scope, and message visibility remain consistent.
+Chat Groups is an ordinary Agent Plugin package. Keep group state, role scope,
+message visibility, and wake scheduling inside the package; use the shared Host
+Bridge for conversations, branches, Agent turns, roles, events, and optional
+opaque flow projections. Use `parent_checkpoint_id: null` for wakes so the
+bridge resolves the current branch head at submission time.

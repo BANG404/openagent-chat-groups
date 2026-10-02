@@ -3,11 +3,17 @@
 The standard Agent Plugin package for OpenAgent Chat Groups. The package carries
 its portable identity, Skill, MCP server, and package-owned group state. The
 trusted OpenAgent Runtime supplies only generic conversations, Agent turns,
-cancellation, roles, events, and the plugin host bridge.
+cancellation, roles, events, and the plugin host bridge. The vendored
+`bin/lib/openagent-host.mjs` client is the same capability interface used by
+every plugin; member wake-ups call `agent.wake`.
+
+The shared bridge also exposes `conversation.flow.set` for an optional opaque
+package projection. Chat Groups keeps its durable group state in `PLUGIN_DATA`;
+it does not register a Runtime-owned group implementation.
 
 Install the package from this repository through **Settings -> Plugins ->
-Install**, or subscribe to the GitHub repository in an OpenAgent build that
-ships the Chat Groups Runtime binding.
+Install**, or subscribe to its GitHub repository through the ordinary plugin
+update flow.
 
 ## Message policies
 
@@ -28,8 +34,8 @@ checkout, pointing at this directory.
 bun <plugin-kit>/scripts/validate-plugin.mjs .
 ```
 
-The package follows the portable Agent Plugins 1.0.0 format and the
-`extensions.openagent.runtime` binding defined by OpenAgent.
+The package follows the portable Agent Plugins 1.0.0 format and the generic
+`extensions.openagent` package contract.
 
 ## License
 
