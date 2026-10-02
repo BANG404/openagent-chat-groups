@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
-import { context, host } from "./chat-groups-host.mjs";
+import { agent, context, conversation, event, roles as hostRoles } from "./chat-groups-host.mjs";
 import {
   appendMessage,
   dataRoot,
@@ -120,11 +120,11 @@ function runMutation(fn) {
 }
 
 function emit(name, payload) {
-  void host("event.emit", { name, payload }).catch(() => {});
+  void event.emit(name, payload).catch(() => {});
 }
 
 async function roles(workspace) {
-  return (await host("roles.list", { workspace })) ?? [];
+  return (await hostRoles.list({ workspace })) ?? [];
 }
 
 async function roleByName(name, workspace) {
@@ -139,7 +139,7 @@ async function roleById(id, workspace) {
 async function ensureMemberFromConversation(state, groupId, conversationId, workspace) {
   let member = state.members.find((candidate) => candidate.group_id === groupId && candidate.conversation_id === conversationId);
   if (member) return member;
-  const detail = await host("conversation.state", { conv_id: conversationId });
+  const detail = await conversation.state(conversationId);
   if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
   const role = detail.role_id ? await roleById(detail.role_id, workspace) : null;
   member = newMember(groupId, conversationId, detail.role_id ?? null, role?.name ?? detail.title ?? "role", detail.branch_id ?? null);
@@ -154,11 +154,11 @@ async function materializeRoster(state, group, requested, workspace) {
     const role = roster.find((item) => item.role_name.toLocaleLowerCase() === String(name).toLocaleLowerCase());
     if (!role) continue;
     if (state.members.some((member) => member.group_id === group.id && member.role_id === role.role_id)) continue;
-    const created = await host("conversation.create", {
+    const created = await conversation.create({
       title: `${group.title}: ${role.role_name}`,
       workspace,
-      parent_conv_id: group.id,
-      role_id: role.role_id,
+      parentConvId: group.id,
+      roleId: role.role_id,
     });
     state.members.push(newMember(group.id, created.conv_id, role.role_id, role.role_name, created.branch_id));
   }
@@ -190,7 +190,7 @@ function resolveMentions(state, group, requested, userContent) {
 
 async function ensureBranch(member) {
   if (member.branch_id) return member.branch_id;
-  const detail = await host("conversation.state", { conv_id: member.conversation_id });
+  const detail = await conversation.state(member.conversation_id);
   member.branch_id = detail.branch_id ?? null;
   return member.branch_id;
 }
@@ -209,10 +209,9 @@ function wakePrompt(group, message) {
 async function wakeMember(group, message, member, attempt = 0) {
   const branchId = await ensureBranch(member);
   try {
-    await host("agent.wake", {
-      request: {
-        conv_id: member.conversation_id,
-        branch_id: branchId,
+    await agent.wake({
+        convId: member.conversation_id,
+        branchId,
         text: wakePrompt(group, message),
         // Resolve the branch head in the bridge immediately before the
         // submission. A checkpoint read here would be stale if another turn
@@ -223,8 +222,7 @@ async function wakeMember(group, message, member, attempt = 0) {
         model_binding: null,
         user_message_id: null,
         assistant_message_id: null,
-      },
-    });
+    }, { wait: false });
   } catch (error) {
     const text = String(error?.message ?? error);
     if (text.includes("already active for this conversation") && attempt < 5) {
@@ -264,7 +262,7 @@ async function addMember(args) {
   const { workspace } = context(args);
   const state = loadState(root);
   const group = groupFor(state, String(args.group_id), workspace);
-  const detail = await host("conversation.state", { conv_id: String(args.conversation_id) });
+  const detail = await conversation.state(String(args.conversation_id));
   if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
   const role = args.role_id ? await roleById(args.role_id, workspace) : null;
   const existing = state.members.find((member) => member.group_id === group.id && member.conversation_id === detail.conv_id);
@@ -351,12 +349,11 @@ async function sendPrivate(args) {
   const conversationId = String(args.conversation_id ?? "").trim();
   const content = String(args.content ?? "").trim();
   if (!conversationId || !content) throw new Error("conversation_id and content are required");
-  const detail = await host("conversation.state", { conv_id: conversationId });
+  const detail = await conversation.state(conversationId);
   if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
-  await host("agent.submit", {
-    request: {
-      conv_id: conversationId,
-      branch_id: detail.branch_id ?? null,
+  await agent.submit({
+      convId: conversationId,
+      branchId: detail.branch_id ?? null,
       text: content,
       // The generic bridge resolves the current branch head at submission
       // time, so private messages cannot fork from a stale state snapshot.
@@ -366,8 +363,7 @@ async function sendPrivate(args) {
       model_binding: null,
       user_message_id: null,
       assistant_message_id: null,
-    },
-  });
+    });
   return { conversation_id: conversationId, accepted: true };
 }
 
