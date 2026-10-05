@@ -1,14 +1,52 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "chat-groups",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Mention-aware group conversations for OpenAgent.",
   "license": "MIT",
   "repository": "https://github.com/BANG404/openagent-chat-groups",
   "keywords": ["openagent", "chat-groups", "conversation"],
   "extensions": {
     "openagent": {
-      "capabilities": ["mcp"]
+      "capabilities": ["mcp"],
+      "i18n": {
+        "supported_locales": ["en", "zh"],
+        "default_locale": "en",
+        "translations": {
+          "en": {
+            "display_name": "Chat Groups",
+            "description": "Mention-aware group conversations for OpenAgent.",
+            "notice.conversationWorkspace": "Conversation is outside the current workspace",
+            "notice.titleEmpty": "title is empty",
+            "notice.contentEmpty": "content is empty",
+            "notice.titleContentRequired": "title and content are required",
+            "notice.unknownRole": "Unknown role '{name}'",
+            "notice.conversationContentRequired": "conversation_id and content are required",
+            "notice.groupMissing": "Chat group not found",
+            "notice.groupWorkspace": "Chat group is outside the current workspace",
+            "notice.unknownTool": "Unknown tool: {name}",
+            "notice.methodMissing": "Method not found: {method}",
+            "notice.dataMissing": "PLUGIN_DATA is not set",
+            "notice.unexpected": "Chat Groups operation failed ({code})"
+          },
+          "zh": {
+            "display_name": "Chat Groups",
+            "description": "支持提及成员的 OpenAgent 群组会话。",
+            "notice.conversationWorkspace": "该会话不属于当前工作区",
+            "notice.titleEmpty": "标题不能为空",
+            "notice.contentEmpty": "内容不能为空",
+            "notice.titleContentRequired": "标题和内容均为必填项",
+            "notice.unknownRole": "未知角色“{name}”",
+            "notice.conversationContentRequired": "conversation_id 和 content 均为必填项",
+            "notice.groupMissing": "找不到群组会话",
+            "notice.groupWorkspace": "该群组不属于当前工作区",
+            "notice.unknownTool": "未知工具：{name}",
+            "notice.methodMissing": "找不到方法：{method}",
+            "notice.dataMissing": "未设置 PLUGIN_DATA",
+            "notice.unexpected": "Chat Groups 操作失败（{code}）"
+          }
+        }
+      }
     }
   }
 }

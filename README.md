@@ -24,6 +24,14 @@ belongs to messages this package's own automation would print; this package
 ships no automation, so it could never take effect and would only add a second
 entry to the plugin card's policy count.
 
+## Language support
+
+The package declares English and Chinese in `plugin.json`. OpenAgent supplies
+the current application language to each MCP call and through `locale.get`
+when the process reports an independent notice. Plugin metadata, validation
+feedback, and operational notices follow that language. Group IDs, role names,
+conversation content, and stored messages keep their original values.
+
 ## Development
 
 Validate the package with the validator from

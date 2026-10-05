@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
-import { agent, context, conversation, event, roles as hostRoles } from "./chat-groups-host.mjs";
+import { agent, context, conversation, event, locale as hostLocale, roles as hostRoles } from "./chat-groups-host.mjs";
 import {
   appendMessage,
   dataRoot,
@@ -15,6 +15,7 @@ import {
   newMessage,
   saveState,
 } from "./chat-groups-state.mjs";
+import { defaultLocale, errorNotice, noticeText, requestLocale } from "./i18n.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const root = dataRoot();
@@ -382,6 +383,14 @@ async function callTool(name, args) {
 }
 
 function send(message) { process.stdout.write(`${JSON.stringify(message)}\n`); }
+function methodNotFound(id, method) {
+  const respond = (locale) => send({
+    jsonrpc: "2.0",
+    id,
+    error: { code: -32601, message: noticeText("notice.methodMissing", { method }, locale) },
+  });
+  void requestLocale({}, { locale: hostLocale }).then(respond).catch(() => respond(defaultLocale));
+}
 function reply(id, value, isError = false) {
   send({
     jsonrpc: "2.0",
@@ -396,17 +405,22 @@ function reply(id, value, isError = false) {
 function handle(message) {
   const { id, method, params } = message;
   if (method === "initialize") {
-    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.0.0" } } });
+    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.0.4" } } });
     return;
   }
   if (method === "notifications/initialized") return;
   if (method === "ping") { send({ jsonrpc: "2.0", id, result: {} }); return; }
   if (method === "tools/list") { send({ jsonrpc: "2.0", id, result: { tools: TOOLS } }); return; }
   if (method === "tools/call") {
-    callTool(params?.name, params?.arguments ?? {}).then((value) => reply(id, value)).catch((error) => reply(id, error?.message ?? error, true));
+    const args = params?.arguments ?? {};
+    callTool(params?.name, args).then((value) => reply(id, value)).catch(async (error) => {
+      let requestedLocale = defaultLocale;
+      try { requestedLocale = await requestLocale(args, { locale: hostLocale }); } catch {}
+      reply(id, errorNotice(error, requestedLocale), true);
+    });
     return;
   }
-  if (id !== undefined) send({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
+  if (id !== undefined) methodNotFound(id, method);
 }
 
 let buffer = "";
@@ -418,7 +432,11 @@ process.stdin.on("data", (chunk) => {
     const line = buffer.slice(0, index).trim();
     buffer = buffer.slice(index + 1);
     if (line) {
-      try { handle(JSON.parse(line)); } catch (error) { process.stderr.write(`chat-groups server: ${error.message}\n`); }
+      try { handle(JSON.parse(line)); } catch (error) {
+        void requestLocale({}, { locale: hostLocale })
+          .then((requestedLocale) => process.stderr.write(`${errorNotice(error, requestedLocale)}\n`))
+          .catch(() => process.stderr.write(`${errorNotice(error, defaultLocale)}\n`));
+      }
     }
     index = buffer.indexOf("\n");
   }
