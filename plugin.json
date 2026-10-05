@@ -1,13 +1,14 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "chat-groups",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Mention-aware group conversations for OpenAgent.",
   "license": "MIT",
   "repository": "https://github.com/BANG404/openagent-chat-groups",
   "keywords": ["openagent", "chat-groups", "conversation"],
   "extensions": {
     "openagent": {
+      "mcp_tool_mode": "relay",
       "capabilities": ["mcp"],
       "i18n": {
         "supported_locales": ["en", "zh"],
@@ -30,7 +31,7 @@
             "notice.unexpected": "Chat Groups operation failed ({code})"
           },
           "zh": {
-            "display_name": "Chat Groups",
+            "display_name": "聊天群组",
             "description": "支持提及成员的 OpenAgent 群组会话。",
             "notice.conversationWorkspace": "该会话不属于当前工作区",
             "notice.titleEmpty": "标题不能为空",

@@ -48,3 +48,12 @@ The package follows the portable Agent Plugins 1.0.0 format and the generic
 ## License
 
 MIT
+
+## MCP mounting and plugin name
+
+The manifest declares `mcp_tool_mode: relay`. Use `load_tool` to discover and
+mount the package MCP tools before calling them.
+Users may select Direct, Relay, or Follow plugin declaration in OpenAgent
+Settings; the override applies to every server in this package.
+The English and Chinese display names follow the application language; the
+package ID, commands, tool names and persisted state remain stable.
