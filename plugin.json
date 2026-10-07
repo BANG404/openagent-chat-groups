@@ -18,6 +18,7 @@
           "scope": "workspace",
           "activation_tools": [
             "chat_group_start",
+            "chat_group_stop",
             "chat_group_create",
             "chat_group_add_member",
             "chat_group_list",
