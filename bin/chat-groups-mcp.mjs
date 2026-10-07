@@ -28,8 +28,20 @@ import { defaultLocale, errorNotice, noticeText, requestLocale } from "./i18n.mj
 const PROTOCOL_VERSION = "2024-11-05";
 const root = dataRoot();
 let mutation = Promise.resolve();
+const pendingWakes = new Map();
 
 const TOOLS = [
+  {
+    name: "chat_group_stop",
+    description:
+      "Stop the selected group's discussion: cancel all joined member conversations, including the owner, and discard queued wakes. History and membership remain. A new user message or chat_group_start can resume discussion.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["group_id"],
+      properties: { group_id: { type: "string" } },
+    },
+  },
   {
     name: "chat_group_list",
     description:
@@ -289,14 +301,20 @@ function wakePrompt(group, message) {
   ].join("\n");
 }
 
-async function wakeMember(group, message, member, attempt = 0) {
+async function wakeMember(group, message, member, attempt = 0, userRestart = false) {
+  const canWake = () => {
+    const current = groupFor(loadState(root), group.id, group.workspace);
+    return !current.discussion_stopped && (current.wake_epoch ?? 0) === (group.wake_epoch ?? 0);
+  };
+  if (!canWake()) return;
   const branchId = await ensureBranch(member);
+  if (!canWake()) return;
   try {
     await agent.wake(
       {
         convId: member.conversation_id,
         branchId,
-        text: wakePrompt(group, message),
+        text: userRestart ? message.content : wakePrompt(group, message),
         // Resolve the branch head in the bridge immediately before the
         // submission. A checkpoint read here would be stale if another turn
         // finishes while this wake is queued.
@@ -307,12 +325,15 @@ async function wakeMember(group, message, member, attempt = 0) {
         user_message_id: null,
         assistant_message_id: null,
       },
-      { wait: false, hidden: true },
+      { wait: false, hidden: !userRestart },
     );
   } catch (error) {
     const text = String(error?.message ?? error);
     if (text.includes("already active for this conversation") && attempt < 5) {
-      setTimeout(() => void wakeMember(group, message, member, attempt + 1), 150 * (attempt + 1));
+      setTimeout(
+        () => scheduleWake(group, message, member, attempt + 1, userRestart),
+        150 * (attempt + 1),
+      );
     } else {
       emit("chat-group-wake-failed", {
         group_id: group.id,
@@ -322,6 +343,37 @@ async function wakeMember(group, message, member, attempt = 0) {
       });
     }
   }
+}
+
+function scheduleWake(group, message, member, attempt = 0, userRestart = false) {
+  const wakes = pendingWakes.get(group.id) ?? new Set();
+  pendingWakes.set(group.id, wakes);
+  const wake = wakeMember(group, message, member, attempt, userRestart);
+  wakes.add(wake);
+  void wake
+    .catch(() => {})
+    .finally(() => {
+      wakes.delete(wake);
+      if (!wakes.size) pendingWakes.delete(group.id);
+    });
+}
+
+async function stopGroup(args) {
+  const { workspace } = context(args);
+  const state = loadState(root);
+  const group = groupFor(state, String(args.group_id), workspace);
+  group.discussion_stopped = true;
+  group.wake_epoch = (group.wake_epoch ?? 0) + 1;
+  saveState(root, state);
+  // Drain submissions already in flight before cancelling their conversations.
+  await Promise.allSettled([...(pendingWakes.get(group.id) ?? [])]);
+  const ids = [...new Set(membersFor(state, group.id).map((member) => member.conversation_id))];
+  const results = await Promise.allSettled(ids.map((id) => conversation.cancel(id)));
+  const failures = results.filter((result) => result.status === "rejected").length;
+  if (failures)
+    throw new Error(`Could not stop ${failures} group member conversations; retry Stop`);
+  emit("chat-group-stopped", { group_id: group.id });
+  return { group_id: group.id, stopped: true, conversation_ids: ids };
 }
 
 async function createGroup(args) {
@@ -403,7 +455,7 @@ async function listMembers(args) {
   return presentMembers(state, group.id, args);
 }
 
-async function sendGroupMessage(args) {
+async function sendGroupMessage(args, explicitStart = false) {
   const { conversationId, workspace } = context(args);
   const state = loadState(root);
   const group = groupFor(state, String(args.group_id), workspace);
@@ -412,6 +464,10 @@ async function sendGroupMessage(args) {
   if (conversationId)
     await ensureMemberFromConversation(state, group.id, conversationId, workspace);
   const user = !conversationId;
+  if (user || explicitStart) group.discussion_stopped = false;
+  // Cancellation blocks hidden continuations. Only explicit fresh input may
+  // restart a stopped member, and its authored text remains visible there.
+  const userRestart = (user || explicitStart) && (group.wake_epoch ?? 0) > 0;
   const requested = Array.isArray(args.mentions) ? args.mentions.map(String) : [];
   const namedMentions = user
     ? [...content.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)].map(
@@ -430,7 +486,7 @@ async function sendGroupMessage(args) {
   for (const id of mentions) {
     const member = members.find((candidate) => candidate.id === id);
     if (!member || member.conversation_id === conversationId) continue;
-    void wakeMember(group, message, member);
+    if (!group.discussion_stopped) scheduleWake(group, message, member, 0, userRestart);
   }
   return message;
 }
@@ -494,13 +550,16 @@ async function startGroup(args) {
     throw new Error(`Group '${group.id}' was saved; retry with group_id to finish adding roles`);
   }
   const targets = args.roles === undefined ? state.rosters[group.id] : roster;
-  const message = await sendGroupMessage({
-    ...args,
-    group_id: group.id,
-    content,
-    mentions: args.start_discussion === false ? [] : targets.map((item) => item.role_name),
-    _openagent: args._openagent,
-  });
+  const message = await sendGroupMessage(
+    {
+      ...args,
+      group_id: group.id,
+      content,
+      mentions: args.start_discussion === false ? [] : targets.map((item) => item.role_name),
+      _openagent: args._openagent,
+    },
+    args.start_discussion !== false,
+  );
   const members = await listMembers({ group_id: group.id, _openagent: args._openagent });
   const senderId = context(args).conversationId;
   return {
@@ -538,14 +597,16 @@ async function sendPrivate(args) {
 }
 
 async function callTool(name, args) {
+  // Long-poll reads must not hold the mutation queue ahead of a Stop request.
+  if (name === "chat_group_read_messages") return readMessages(args);
   return runMutation(async () => {
+    if (name === "chat_group_stop") return stopGroup(args);
     if (name === "chat_group_list") return listGroups(args);
     if (name === "chat_group_start") return startGroup(args);
     if (name === "chat_group_create") return createGroup(args);
     if (name === "chat_group_add_member") return addMember(args);
     if (name === "chat_group_list_members") return listMembers(args);
     if (name === "chat_group_send_message") return sendGroupMessage(args);
-    if (name === "chat_group_read_messages") return readMessages(args);
     if (name === "chat_send_message") return sendPrivate(args);
     throw new Error(`Unknown tool: ${name}`);
   });
@@ -585,7 +646,7 @@ function handle(message) {
       result: {
         protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: "chat-groups", version: "2.0.0" },
+        serverInfo: { name: "chat-groups", version: "2.1.0" },
       },
     });
     return;

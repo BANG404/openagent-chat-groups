@@ -447,7 +447,7 @@
         height: 78px;
         min-height: 64px;
         max-height: 160px;
-        padding: 12px 54px 12px 18px;
+        padding: 12px 92px 12px 18px;
         color: inherit;
         background: transparent;
         border: 0;
@@ -458,7 +458,8 @@
       textarea::placeholder {
         color: var(--muted);
       }
-      #send {
+      #send,
+      #stop {
         position: absolute;
         bottom: 9px;
         right: 9px;
@@ -476,6 +477,17 @@
         filter: brightness(0.9);
       }
       #send:disabled {
+        opacity: 0.25;
+      }
+      #stop {
+        right: 47px;
+        background: var(--soft);
+        color: var(--fg);
+      }
+      #stop:hover:not(:disabled) {
+        background: var(--hover);
+      }
+      #stop:disabled {
         opacity: 0.25;
       }
       @media (prefers-reduced-motion: reduce) {
@@ -526,6 +538,12 @@
             aria-controls="mention-palette"
             aria-expanded="false"
           ></textarea>
+          <button id="stop" type="button" disabled>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" stroke="none" />
+            </svg>
+            <span id="stop-label" class="sr-only"></span>
+          </button>
           <span id="hint" class="sr-only"></span
           ><button id="send" type="button">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12V4m-4 4 4-4 4 4" /></svg
@@ -639,6 +657,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             hint: "Enter to send · Shift+Enter for a new line",
             send: "Send",
             sending: "Sending…",
+            stop: "Stop group discussion",
+            stopping: "Stopping…",
             user: "You",
             unknown: "Agent",
             unsupported:
@@ -662,6 +682,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             hint: "Enter 发送 · Shift+Enter 换行",
             send: "发送",
             sending: "发送中…",
+            stop: "终止群组讨论",
+            stopping: "终止中…",
             user: "你",
             unknown: "智能体",
             unsupported: "当前 OpenAgent 版本不支持侧栏工具，请更新应用。",
@@ -678,6 +700,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           selected = null,
           nextSeq = 0,
           sending = false,
+          stopping = false,
+          stopError = null,
           refreshing = false;
         const pending = new Map(),
           drafts = new Map(),
@@ -895,7 +919,12 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           $("send").title = t(sending ? "sending" : "send");
           $("send").setAttribute("aria-label", t(sending ? "sending" : "send"));
           $("send").disabled =
-            !selected || sending || $("draft").disabled || !$("draft").value.trim();
+            !selected || sending || stopping || $("draft").disabled || !$("draft").value.trim();
+          $("stop-label").textContent = t(stopping ? "stopping" : "stop");
+          $("stop").title = t(stopping ? "stopping" : "stop");
+          $("stop").setAttribute("aria-label", t(stopping ? "stopping" : "stop"));
+          $("stop").disabled =
+            !selected || sending || stopping || $("draft").disabled || !members.length;
           $("message-count").textContent = selected
             ? `${messages.length} ${t("messageCount")}`
             : "";
@@ -965,6 +994,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           }
         }
         async function selectGroup(id) {
+          stopError = null;
           closeMentions();
           mentionDismissed = null;
           drafts.set(draftKey(), $("draft").value);
@@ -1042,7 +1072,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
               renderMembers();
               renderMessages();
             }
-            $("error").hidden = true;
+            if (!stopError) $("error").hidden = true;
             $("draft").disabled = !selected;
             labels();
           } catch (error) {
@@ -1083,6 +1113,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
               ctx.conversation_id !== data.conversation_id;
             const scopeChanged = ctx && ctx.scope !== data.scope;
             if (changed || scopeChanged) {
+              stopError = null;
               if (ctx && selected) {
                 drafts.set(draftKey(), $("draft").value);
                 selections.set(selectionKey(), selected);
@@ -1119,7 +1150,10 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             }
           }
         });
-        $("refresh").onclick = () => void refresh();
+        $("refresh").onclick = () => {
+          stopError = null;
+          void refresh();
+        };
         $("draft").oninput = () => {
           mentionDismissed = null;
           drafts.set(draftKey(), $("draft").value);
@@ -1182,7 +1216,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         };
         async function sendMessage() {
           const content = $("draft").value.trim();
-          if (!content || !selected || sending) return;
+          if (!content || !selected || sending || stopping) return;
           const current = generation,
             key = draftKey();
           sending = true;
@@ -1203,6 +1237,26 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           }
         }
         $("send").onclick = () => void sendMessage();
+        async function stopDiscussion() {
+          if (!selected || sending || stopping || $("stop").disabled) return;
+          const current = generation;
+          stopping = true;
+          stopError = null;
+          labels();
+          try {
+            await request("chat_group_stop", { group_id: selected });
+            if (current === generation) $("error").hidden = true;
+          } catch (error) {
+            if (current === generation) {
+              stopError = error;
+              fail(error);
+            }
+          } finally {
+            stopping = false;
+            labels();
+          }
+        }
+        $("stop").onclick = () => void stopDiscussion();
         labels();
         $("draft").disabled = true;
         $("send").disabled = true;
