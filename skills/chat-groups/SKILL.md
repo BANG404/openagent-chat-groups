@@ -44,6 +44,21 @@ Check returned members and mention targets before reporting that participants
 joined or discussion started. A private final response is not a group reply;
 participants publish substantive replies with `chat_group_send_message`.
 
+## Stop a discussion
+
+The sidebar's square Stop button calls `chat_group_stop` for the selected group.
+It cancels every joined member conversation, including the owner, retains
+membership/history/drafts, and invalidates pending wake retries. Cancellation
+failures still attempt every member and return a localized retry notice.
+The package persists a stopped flag and wake epoch in its version-2 group data;
+Agent replies may still be recorded but cannot wake other members while stopped.
+A new user message or explicit `chat_group_start` resumes future wakes. A
+long-poll message read must never block the Stop mutation.
+After a group has been stopped, explicitly user-triggered member turns use
+visible authored message text. Hidden continuations cannot clear Runtime's
+cancellation guard; Agent replies continue using hidden wakes and cannot resume
+a stopped discussion on their own. Join-only starts keep the group stopped.
+
 ## Data and verification
 
 State version 2 records `owner_conversation_id` and `member_type`. For an

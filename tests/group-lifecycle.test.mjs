@@ -11,7 +11,13 @@ const roleList = [
   { id: "research", name: "科技行业研究员" },
 ];
 
-async function fixture({ legacy, raw, ownerRole = null } = {}) {
+async function fixture({
+  legacy,
+  raw,
+  ownerRole = null,
+  busyWakes = false,
+  failedCancellation = null,
+} = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "chat-groups-lifecycle-"));
   const file = path.join(root, "chat-groups.json");
   if (legacy || raw) writeFileSync(file, raw ?? JSON.stringify(legacy));
@@ -28,6 +34,7 @@ async function fixture({ legacy, raw, ownerRole = null } = {}) {
     ],
   ]);
   const wakes = [],
+    cancellations = [],
     created = [],
     events = [],
     pending = new Map();
@@ -46,8 +53,17 @@ async function fixture({ legacy, raw, ownerRole = null } = {}) {
         created.push(args);
         conversations.set(result.conv_id, { ...result, ...args });
       }
-      if (operation === "agent.wake") wakes.push(args);
       if (operation === "event.emit") events.push(args);
+      if (operation === "agent.wake") {
+        wakes.push(args);
+        if (busyWakes)
+          return Response.json({ ok: false, error: "already active for this conversation" });
+      }
+      if (operation === "conversation.cancel") {
+        cancellations.push(args.conv_id);
+        if (args.conv_id === failedCancellation)
+          return Response.json({ ok: false, error: "fixture cancel failed" });
+      }
       return Response.json({ ok: true, result });
     },
   });
@@ -132,6 +148,7 @@ async function fixture({ legacy, raw, ownerRole = null } = {}) {
     call,
     ok,
     wakes,
+    cancellations,
     created,
     events,
     conversations,
@@ -167,6 +184,134 @@ test("create immediately joins the creator as localized owner, with no conversat
     expect(added.role_name).toBe("群主");
     expect(loadState(f.root).messages).toHaveLength(0);
     expect(f.wakes).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Stop cancels the selected group's owner and members, preserving data and later user wakes", async () => {
+  const f = await fixture();
+  try {
+    const started = await f.ok("chat_group_start", {
+      title: "News",
+      content: "Start",
+      roles: ["product", "research"],
+    });
+    await f.waitWakes(2);
+    const other = await f.ok("chat_group_start", {
+      title: "Other",
+      content: "Separate",
+      roles: ["developer"],
+      start_discussion: false,
+    });
+    const before = loadState(f.root);
+    const stopped = await f.ok("chat_group_stop", { group_id: started.group.id });
+    expect(stopped.stopped).toBe(true);
+    expect(f.cancellations.sort()).toEqual(["creator", "child-0", "child-1"].sort());
+    expect(f.cancellations).not.toContain("child-2");
+    const after = loadState(f.root);
+    expect(after.messages).toEqual(before.messages);
+    expect(after.members).toEqual(before.members);
+    expect(after.groups.find((g) => g.id === other.group.id).discussion_stopped).toBeUndefined();
+    await f.ok(
+      "chat_group_send_message",
+      { group_id: started.group.id, content: "Late reply", mentions: ["all"] },
+      { conversation_id: "child-0" },
+    );
+    await Bun.sleep(30);
+    expect(f.wakes).toHaveLength(2);
+    await f.ok(
+      "chat_group_send_message",
+      { group_id: started.group.id, content: "@互联网产品经理 Continue" },
+      { conversation_id: "" },
+    );
+    await f.waitWakes(3);
+    expect(f.wakes[2].hidden).toBe(false);
+    expect(f.wakes[2].text).toBe("@互联网产品经理 Continue");
+    expect(loadState(f.root).groups.find((g) => g.id === started.group.id).discussion_stopped).toBe(
+      false,
+    );
+    await f.ok("chat_group_stop", { group_id: started.group.id });
+    await f.ok("chat_group_start", {
+      group_id: started.group.id,
+      title: "News",
+      content: "Join only",
+      start_discussion: false,
+    });
+    expect(loadState(f.root).groups.find((g) => g.id === started.group.id).discussion_stopped).toBe(
+      true,
+    );
+    await f.ok("chat_group_start", {
+      group_id: started.group.id,
+      title: "News",
+      content: "Restart",
+    });
+    await f.waitWakes(5);
+    expect(f.wakes.slice(3).every((wake) => wake.hidden === false && wake.text === "Restart")).toBe(
+      true,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("Stop invalidates busy wake retries even after immediate resume", async () => {
+  const f = await fixture({ busyWakes: true });
+  try {
+    const started = await f.ok("chat_group_start", {
+      title: "News",
+      content: "Old discussion",
+      roles: ["product"],
+    });
+    await f.waitWakes(1);
+    await f.ok("chat_group_stop", { group_id: started.group.id });
+    await f.ok(
+      "chat_group_send_message",
+      { group_id: started.group.id, content: "New user message" },
+      { conversation_id: "" },
+    );
+    await Bun.sleep(350);
+    expect(f.wakes).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Stop attempts every member and localizes partial cancellation failure", async () => {
+  const f = await fixture({ failedCancellation: "creator" });
+  try {
+    const started = await f.ok("chat_group_start", {
+      title: "News",
+      content: "Start",
+      roles: ["product"],
+      start_discussion: false,
+    });
+    const result = await f.call("chat_group_stop", { group_id: started.group.id });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe("无法终止 1 个群组成员会话，请重试终止");
+    expect(f.cancellations.sort()).toEqual(["child-0", "creator"]);
+    expect(loadState(f.root).groups[0].discussion_stopped).toBe(true);
+    const invalid = await f.call(
+      "chat_group_stop",
+      { group_id: started.group.id },
+      { workspace: "other" },
+    );
+    expect(invalid.isError).toBe(true);
+    expect(f.cancellations).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Stop is not delayed by an incremental long-poll read", async () => {
+  const f = await fixture();
+  try {
+    const group = await f.ok("chat_group_create", { title: "News" });
+    const read = f.ok("chat_group_read_messages", { group_id: group.id, wait_secs: 2 });
+    const started = Date.now();
+    await f.ok("chat_group_stop", { group_id: group.id });
+    expect(Date.now() - started).toBeLessThan(1000);
+    await read;
   } finally {
     await f.close();
   }

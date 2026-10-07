@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "chat-groups",
-  "version": "2.0.1",
+  "version": "2.2.1",
   "description": "Mention-aware group conversations for OpenAgent.",
   "license": "MIT",
   "repository": "https://github.com/BANG404/openagent-chat-groups",
@@ -16,6 +16,16 @@
           "title": "Chat Groups",
           "entry": "ui/groups.html",
           "scope": "workspace",
+          "activation_tools": [
+            "chat_group_start",
+            "chat_group_stop",
+            "chat_group_create",
+            "chat_group_add_member",
+            "chat_group_list",
+            "chat_group_list_members",
+            "chat_group_send_message",
+            "chat_group_read_messages"
+          ],
           "icon": "users",
           "capabilities": ["workspace", "conversation", "branch", "locale", "theme"]
         }
@@ -48,7 +58,8 @@
             "notice.memberOwner": "Group owner",
             "notice.memberAgent": "Agent",
             "notice.notMember": "Conversation is not a member of this chat group",
-            "notice.backupFailed": "Chat Groups backup could not be saved"
+            "notice.backupFailed": "Chat Groups backup could not be saved",
+            "notice.stopFailed": "Could not stop {count} group member conversations; retry Stop"
           },
           "zh": {
             "display_name": "聊天群组",
@@ -74,7 +85,8 @@
             "notice.memberOwner": "群主",
             "notice.memberAgent": "智能体",
             "notice.notMember": "该会话不是此聊天组的成员",
-            "notice.backupFailed": "无法保存群组数据备份，原文件已保留"
+            "notice.backupFailed": "无法保存群组数据备份，原文件已保留",
+            "notice.stopFailed": "无法终止 {count} 个群组成员会话，请重试终止"
           }
         }
       }

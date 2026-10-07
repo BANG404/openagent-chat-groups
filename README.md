@@ -41,6 +41,13 @@ update flow.
 
 ## Group sidebar
 
+The panel is hidden by default. Its manifest declares `activation_tools` for
+the group tools, so it appears and opens when the selected branch contains a
+group tool call, including live or restored calls. Sibling branches without
+group calls keep it hidden. Manual collapse is respected for the rest of that
+window session; loading tools alone does not activate it. Group data and tools
+remain available when a host lacks this optional sidebar capability.
+
 The workspace-scoped `groups` sidebar reads the package's existing MCP tools
 through the version-1 sidebar tool bridge. It lists saved groups, members and
 paginated messages, polls for new messages, and sends user messages with optional
@@ -64,6 +71,14 @@ code and links) with preserved line breaks. Raw HTML stays visible text; unsafe
 URL schemes and executable markup are excluded. External HTTP(S) links use the
 optional host opener instead of navigating the panel. Images show their alt
 text; the panel does not fetch network resources.
+The square Stop button beside Send terminates the selected group's member
+turns, including its owner. It keeps messages, membership and the draft, and
+prevents queued or late Agent messages from waking another member. Failed
+cancellations show a localized retry notice. A new user message or explicit
+`chat_group_start` resumes discussion.
+After Stop, a user-triggered member turn records the new authored input visibly
+in that member conversation, respecting Runtime's block on hidden continuations
+restarting cancelled runs.
 The application selects the owning package and supplies workspace and locale;
 the frame receives no bridge credential or conversation transcript. Drafts are
 kept per group while switching the picker and live locale/theme changes preserve
