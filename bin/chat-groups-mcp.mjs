@@ -6,6 +6,7 @@ import {
   appendMessage,
   dataRoot,
   groupFor,
+  groupsForConversation,
   loadState,
   membersFor,
   memberFor,
@@ -24,11 +25,11 @@ let mutation = Promise.resolve();
 const TOOLS = [
   {
     name: "chat_group_list",
-    description: "List collaboration groups in the requested workspace.",
+    description: "List collaboration groups in the requested workspace. Optionally filter by the conversation that created, joined or posted in a group.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: { workspace: { type: "string" } },
+      properties: { workspace: { type: "string" }, conversation_id: { type: "string" } },
     },
   },
   {
@@ -241,11 +242,12 @@ async function wakeMember(group, message, member, attempt = 0) {
 }
 
 async function createGroup(args) {
-  const { workspace } = context(args);
+  const { workspace, conversationId } = context(args);
   const title = String(args.title ?? "").trim();
   if (!title) throw new Error("title is empty");
   const state = loadState(root);
   const group = newGroup(workspace, title);
+  if (conversationId) group.created_by_conversation_id = conversationId;
   state.groups.push(group);
   saveState(root, state);
   emit("chat-group-updated", group);
@@ -255,7 +257,8 @@ async function createGroup(args) {
 async function listGroups(args) {
   const { workspace } = context(args);
   const state = loadState(root);
-  return state.groups
+  const conversationId = String(args.conversation_id ?? "").trim();
+  return (conversationId ? groupsForConversation(state, conversationId) : state.groups)
     .filter((group) => !workspace || group.workspace === workspace)
     .sort((a, b) => b.updated_at - a.updated_at || b.id.localeCompare(a.id));
 }
@@ -408,7 +411,7 @@ function reply(id, value, isError = false) {
 function handle(message) {
   const { id, method, params } = message;
   if (method === "initialize") {
-    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.1.3" } } });
+    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.2.0" } } });
     return;
   }
   if (method === "notifications/initialized") return;

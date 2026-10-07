@@ -631,6 +631,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             role: "Role",
             noMatches: "No matching members",
             empty: "No chat groups in this workspace. Ask the Agent to create a group.",
+            emptyConversation:
+              "No chat groups for this conversation. Ask the Agent to create or join a group.",
             noMessages: "No messages yet",
             placeholder: "Message the group; @name to notify a member",
             hint: "Enter to send · Shift+Enter for a new line",
@@ -652,6 +654,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             role: "角色",
             noMatches: "没有匹配的成员",
             empty: "当前工作区暂无群组，可以让智能体创建群组。",
+            emptyConversation: "当前对话暂无相关群组，可以让智能体创建或加入群组。",
             noMessages: "暂无消息",
             placeholder: "向群组发送消息，@名字可通知成员",
             hint: "Enter 发送 · Shift+Enter 换行",
@@ -675,10 +678,12 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           sending = false,
           refreshing = false;
         const pending = new Map(),
-          drafts = new Map();
+          drafts = new Map(),
+          selections = new Map();
         const language = () => (ctx?.locale?.startsWith("zh") ? "zh" : "en");
         const t = (key) => copy[language()][key];
         const draftKey = () => `${ctx?.workspace || ""}\u0000${selected || ""}`;
+        const selectionKey = () => `${ctx?.workspace || ""}\u0000${ctx?.conversation_id || ""}`;
         const markdown = new marked.Marked({
           gfm: true,
           breaks: true,
@@ -877,14 +882,17 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           $("send-label").textContent = t(sending ? "sending" : "send");
           $("send").title = t(sending ? "sending" : "send");
           $("send").setAttribute("aria-label", t(sending ? "sending" : "send"));
-          $("send").disabled = !selected || sending || !$("draft").value.trim();
+          $("send").disabled =
+            !selected || sending || $("draft").disabled || !$("draft").value.trim();
           $("message-count").textContent = selected
             ? `${messages.length} ${t("messageCount")}`
             : "";
           $("group-title").textContent =
             groups.find((g) => g.id === selected)?.title || t("choose");
           $("member-title").textContent = `${t("members")} (${members.length})`;
-          $("empty").textContent = t(groups.length ? "noMessages" : "empty");
+          $("empty").textContent = t(
+            groups.length ? "noMessages" : ctx?.conversation_id ? "emptyConversation" : "empty",
+          );
           renderMentions();
         }
         function renderMessages() {
@@ -946,15 +954,19 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           mentionDismissed = null;
           drafts.set(draftKey(), $("draft").value);
           selected = id;
+          selections.set(selectionKey(), id);
           messages = [];
           members = [];
           nextSeq = 0;
           $("draft").value = drafts.get(draftKey()) || "";
           $("picker").open = false;
           ++generation;
+          $("draft").disabled = true;
           labels();
           renderMembers();
           renderMessages();
+          $("skeleton").hidden = false;
+          $("empty").hidden = true;
           await refresh();
         }
         async function refresh() {
@@ -962,15 +974,22 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           refreshing = true;
           const current = generation;
           try {
-            const loaded = await request("chat_group_list");
+            const loaded = await request(
+              "chat_group_list",
+              ctx?.conversation_id ? { conversation_id: ctx.conversation_id } : {},
+            );
             if (current !== generation) return;
             groups = loaded;
             if (!groups.some((g) => g.id === selected)) {
-              selected = groups[0]?.id || null;
+              if (selected) drafts.set(draftKey(), $("draft").value);
+              const remembered = selections.get(selectionKey());
+              selected = groups.find((g) => g.id === remembered)?.id || groups[0]?.id || null;
               messages = [];
+              members = [];
               nextSeq = 0;
               $("draft").value = drafts.get(draftKey()) || "";
             }
+            if (selected) selections.set(selectionKey(), selected);
             $("choices").replaceChildren();
             for (const group of groups) {
               const button = document.createElement("button");
@@ -1008,8 +1027,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
               renderMessages();
             }
             $("error").hidden = true;
-            labels();
             $("draft").disabled = !selected;
+            labels();
           } catch (error) {
             if (current === generation) fail(error);
           } finally {
@@ -1042,10 +1061,16 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             }
           }
           if (data.type === "openagent:sidebar-context") {
-            const changed = !ctx || ctx.workspace !== data.workspace;
+            const changed =
+              !ctx ||
+              ctx.workspace !== data.workspace ||
+              ctx.conversation_id !== data.conversation_id;
             const scopeChanged = ctx && ctx.scope !== data.scope;
             if (changed || scopeChanged) {
-              if (ctx) drafts.set(draftKey(), $("draft").value);
+              if (ctx && selected) {
+                drafts.set(draftKey(), $("draft").value);
+                selections.set(selectionKey(), selected);
+              }
               ++generation;
               if (changed) {
                 closeMentions();
@@ -1055,6 +1080,10 @@ if(__exports != exports)module.exports = exports;return module.exports}));
                 messages = [];
                 selected = null;
                 nextSeq = 0;
+                $("choices").replaceChildren();
+                renderMembers();
+                renderMessages();
+                $("draft").disabled = true;
               }
               for (const wait of pending.values()) {
                 clearTimeout(wait.timeout);
@@ -1063,6 +1092,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
               pending.clear();
               if (changed) $("draft").value = "";
               $("skeleton").hidden = false;
+              $("empty").hidden = true;
             }
             ctx = data;
             labels();

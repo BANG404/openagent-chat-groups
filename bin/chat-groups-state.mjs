@@ -88,6 +88,20 @@ export function membersFor(state, groupId) {
     .sort((a, b) => a.joined_at - b.joined_at || a.id.localeCompare(b.id));
 }
 
+export function groupsForConversation(state, conversationId) {
+  const related = new Set(
+    state.members.filter((member) => member.conversation_id === conversationId).map((member) => member.group_id),
+  );
+  for (const message of state.messages) {
+    if (["conversation", "agent"].includes(message.sender_type) && message.sender_id === conversationId) {
+      related.add(message.group_id);
+    }
+  }
+  return state.groups.filter((group) =>
+    group.created_by_conversation_id === conversationId || related.has(group.id),
+  );
+}
+
 export function messagesFor(state, groupId, fromSeq = 0, limit = 50) {
   return state.messages
     .filter((message) => message.group_id === groupId && message.seq > fromSeq)

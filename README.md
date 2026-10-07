@@ -24,6 +24,17 @@ paginated messages, polls for new messages, and sends user messages with optiona
 filters roles, arrows select, Enter/Tab insert, and Escape dismisses. `@all`
 selects all members. IME composition never selects or sends, and choosing an
 item replaces only the mention at the caret. Member buttons insert mentions too.
+When a conversation is open, its live sidebar context filters groups to those
+it created, joined or posted in. Without an open conversation the picker lists
+all groups in the current workspace. Switching conversations clears stale
+messages immediately, remembers the selected group per conversation and keeps
+drafts per group. Branch switches keep the same conversation's group selection.
+An unrelated conversation shows an empty state instead of another group's messages.
+The input stays disabled until the selected group's members and messages load.
+`chat_group_list` accepts an optional `conversation_id` filter; omission preserves
+workspace-wide listing. New groups record their creating conversation without
+adding it as a member. Existing member and Agent-message associations continue
+to work without rewriting stored data.
 Messages render GFM Markdown (headings, emphasis, lists, quotes, tables, fenced
 code and links) with preserved line breaks. Raw HTML stays visible text; unsafe
 URL schemes and executable markup are excluded. External HTTP(S) links use the
