@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "chat-groups",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Mention-aware group conversations for OpenAgent.",
   "license": "MIT",
   "repository": "https://github.com/BANG404/openagent-chat-groups",
@@ -16,6 +16,15 @@
           "title": "Chat Groups",
           "entry": "ui/groups.html",
           "scope": "workspace",
+          "activation_tools": [
+            "chat_group_start",
+            "chat_group_create",
+            "chat_group_add_member",
+            "chat_group_list",
+            "chat_group_list_members",
+            "chat_group_send_message",
+            "chat_group_read_messages"
+          ],
           "icon": "users",
           "capabilities": ["workspace", "conversation", "branch", "locale", "theme"]
         }

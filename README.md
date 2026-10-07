@@ -36,6 +36,13 @@ update flow.
 
 ## Group sidebar
 
+The panel is hidden by default. Its manifest declares `activation_tools` for
+the group tools, so it appears and opens when the selected branch contains a
+group tool call, including live or restored calls. Sibling branches without
+group calls keep it hidden. Manual collapse is respected for the rest of that
+window session; loading tools alone does not activate it. Group data and tools
+remain available when a host lacks this optional sidebar capability.
+
 The workspace-scoped `groups` sidebar reads the package's existing MCP tools
 through the version-1 sidebar tool bridge. It lists saved groups, members and
 paginated messages, polls for new messages, and sends user messages with optional
