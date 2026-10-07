@@ -338,6 +338,34 @@ test("legacy owner and rosters recover with an exact backup, stable IDs and no a
   }
 });
 
+test("a recorded legacy creator joins as owner without requiring an opening message", async () => {
+  const f = await fixture({
+    legacy: {
+      groups: [{ id: "old", workspace: "workspace", created_by_conversation_id: "creator" }],
+      members: [],
+      messages: [],
+      rosters: {},
+    },
+    ownerRole: "product",
+  });
+  try {
+    const original = readFileSync(f.file, "utf8");
+    const members = await f.ok("chat_group_list_members", { group_id: "old" });
+    expect(members).toHaveLength(1);
+    expect(members[0]).toMatchObject({
+      member_type: "owner",
+      conversation_id: "creator",
+      role_id: "product",
+      role_name: "互联网产品经理",
+    });
+    expect(loadState(f.root).groups[0].owner_conversation_id).toBe("creator");
+    expect(readFileSync(`${f.file}.v1.bak`, "utf8")).toBe(original);
+    expect(f.wakes).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
 test("a failed upgrade backup preserves the original state and permits retry after repair", async () => {
   const f = await fixture({ legacy: { groups: [], members: [], messages: [], rosters: {} } });
   try {
