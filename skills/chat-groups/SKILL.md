@@ -59,3 +59,20 @@ The host's `test:blackbox:chat-groups-sidebar` covers owner labels, stable owner
 mentions, role-bound owners, live English/Chinese and light/dark changes, reload,
 and the existing sidebar interactions. `test:blackbox:chat-groups-wake` verifies
 hidden wake prompts and transcript recovery in the real desktop window.
+
+## Participant conversations
+
+Create each selected role with the generic `conversation.create` bridge, passing
+its saved `role_id` and the group's `owner_conversation_id` as `parent_conv_id`.
+A group ID is package data, never a Runtime conversation ID. Publish the standard
+`subagent-started` projection after persisting the member, with `started: false`
+and a hidden empty task, so join-only conversations appear live without a fake
+user message or running state. Use `agent.wake` for discussion on that same branch.
+
+Membership is explicit: creation/start and `chat_group_add_member` join
+conversations. Sending and listing messages never auto-enroll their authors.
+An unjoined Runtime child task cannot send a group reply. Participants send from
+their own conversation; if needed, load the relay tools with `load_tool` rather
+than delegating a send with `spawn_agent`. Existing member IDs and message history
+remain unchanged; this fix does not merge historical conversations or rewrite
+old parent links.

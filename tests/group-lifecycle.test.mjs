@@ -29,6 +29,7 @@ async function fixture({ legacy, raw, ownerRole = null } = {}) {
   ]);
   const wakes = [],
     created = [],
+    events = [],
     pending = new Map();
   let failRole = null;
   const host = Bun.serve({
@@ -46,6 +47,7 @@ async function fixture({ legacy, raw, ownerRole = null } = {}) {
         conversations.set(result.conv_id, { ...result, ...args });
       }
       if (operation === "agent.wake") wakes.push(args);
+      if (operation === "event.emit") events.push(args);
       return Response.json({ ok: true, result });
     },
   });
@@ -131,6 +133,8 @@ async function fixture({ legacy, raw, ownerRole = null } = {}) {
     ok,
     wakes,
     created,
+    events,
+    conversations,
     waitWakes,
     close,
     failCreationFor: (id) => {
@@ -188,6 +192,20 @@ test("start joins all selected roles and wakes them once; create then start reus
         .sort(),
     ).toEqual(roleList.map((r) => r.name).sort());
     expect(started.message.mentions).toHaveLength(3);
+    expect(f.created.every((request) => request.parent_conv_id === "creator")).toBe(true);
+    expect(f.created.map((request) => request.role_id).sort()).toEqual([
+      "developer",
+      "product",
+      "research",
+    ]);
+    const children = f.events.filter((item) => item.name === "subagent-started");
+    expect(children).toHaveLength(3);
+    expect(
+      children.every(
+        ({ payload }) =>
+          payload.parent_conv_id === "creator" && payload.started === false && payload.hidden_task,
+      ),
+    ).toBe(true);
     expect(started.discussion_started).toBe(true);
     await f.waitWakes(3);
     expect(
@@ -397,5 +415,57 @@ test("corrupt, malformed or unsupported data cannot be overwritten by creating a
     } finally {
       await f.close();
     }
+  }
+});
+
+test("Runtime child tasks cannot auto-join by sending or by appearing in historical messages", async () => {
+  const f = await fixture();
+  try {
+    const started = await f.ok("chat_group_start", {
+      title: "News",
+      content: "Discuss",
+      roles: ["product"],
+      start_discussion: false,
+    });
+    const participant = started.members[1];
+    f.conversations.set("worker", {
+      conv_id: "worker",
+      branch_id: "worker-branch",
+      workspace: "workspace",
+      parent_conv_id: participant.conversation_id,
+      role_id: "product",
+      flow_kind: "subagent_v2",
+    });
+    const result = await f.call(
+      "chat_group_send_message",
+      {
+        group_id: started.group.id,
+        content: "Delegated reply",
+      },
+      { conversation_id: "worker" },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe("该会话不是此聊天组的成员");
+    expect(loadState(f.root).members).toHaveLength(2);
+    expect(loadState(f.root).messages).toHaveLength(1);
+    const state = loadState(f.root);
+    state.messages.push({
+      group_id: started.group.id,
+      sender_type: "conversation",
+      sender_id: "worker",
+      seq: 2,
+      content: "Historical reply",
+    });
+    writeFileSync(f.file, JSON.stringify(state));
+    expect(await f.ok("chat_group_list_members", { group_id: started.group.id })).toHaveLength(2);
+    const reply = await f.ok(
+      "chat_group_send_message",
+      { group_id: started.group.id, content: "Participant reply" },
+      { conversation_id: participant.conversation_id },
+    );
+    expect(reply.sender_id).toBe(participant.conversation_id);
+    expect(loadState(f.root).members).toHaveLength(2);
+  } finally {
+    await f.close();
   }
 });

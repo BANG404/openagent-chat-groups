@@ -18,6 +18,11 @@ starts their discussion by default. Use `start_discussion: false` to add them
 without waking them. Pass `group_id` to start an existing group. The tools return
 the joined members; a list of role names in a message is not proof of membership.
 The bundled Skill documents role selection, explicit mentions and recovery.
+Each participant is created through the standard conversation bridge with its
+saved role and the creating conversation as its parent. Runtime `spawn_agent`
+tasks are independent execution helpers: sending a message does not join them
+to a group. A participant publishes from its own member conversation; only
+creation/start or an explicit add-member operation establishes membership.
 
 Version 2.0.0 changes the start default from saving a deferred roster to joining
 and waking the selected roles. Existing clients that only prepare a group should

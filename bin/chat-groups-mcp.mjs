@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
+
 import { readFileSync } from "node:fs";
 import {
   agent,
@@ -103,7 +105,7 @@ const TOOLS = [
   {
     name: "chat_group_send_message",
     description:
-      "Record a group message. Agent messages wake only explicit mentions (member IDs, exact role names, owner/群主 or all); textual @names alone do not wake agents. User messages also resolve @names. The sender is never woken by its own message.",
+      "Record a group message from an already joined member conversation; sending never joins another conversation. Agent messages wake only explicit mentions (member IDs, exact role names, owner/群主 or all); textual @names alone do not wake agents. User messages also resolve @names. The sender is never woken by its own message.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -210,7 +212,7 @@ async function materializeRoster(state, group, requested, workspace) {
     const created = await conversation.create({
       title: `${group.title}: ${role.role_name}`,
       workspace,
-      parentConvId: group.id,
+      parentConvId: group.owner_conversation_id ?? null,
       roleId: role.role_id,
     });
     state.members.push(
@@ -218,6 +220,19 @@ async function materializeRoster(state, group, requested, workspace) {
     );
     // Persist each successful creation before another host operation can fail.
     saveState(root, state);
+    await event.emit("subagent-started", {
+      plugin_id: "chat-groups",
+      parent_conv_id: group.owner_conversation_id ?? null,
+      sub_conv_id: created.conv_id,
+      branch_id: created.branch_id,
+      title: `${group.title}: ${role.role_name}`,
+      role_id: role.role_id,
+      workspace,
+      task: "",
+      task_msg_id: randomUUID(),
+      hidden_task: true,
+      started: false,
+    });
   }
 }
 
@@ -283,6 +298,7 @@ function wakePrompt(group, message) {
     `[chat_group:${group.id} message:${message.id}] You were selected in a Chat Groups message.`,
     "Read the latest group messages with chat_group_read_messages when context is needed.",
     "If you have a substantive response, publish one concise reply with chat_group_send_message using this group_id before finishing. The private final answer is not visible in the group.",
+    "Publish from this member conversation directly. If tools are relay-mounted, load plugin:chat-groups:chat-groups with load_tool. Do not spawn a child agent to send a group reply; Runtime child tasks are not group members.",
     "Do not create another group or wake additional roles unless the message explicitly asks you to.",
     "",
     `Group message:\n${message.content}`,
@@ -385,18 +401,6 @@ async function listMembers(args) {
   const group = groupFor(state, String(args.group_id), workspace);
   if (group.owner_conversation_id)
     await ensureMemberFromConversation(state, group.id, group.owner_conversation_id, workspace);
-  const senderIds = new Set(
-    state.messages
-      .filter(
-        (message) =>
-          message.group_id === group.id &&
-          message.sender_type === "conversation" &&
-          message.sender_id,
-      )
-      .map((message) => message.sender_id),
-  );
-  for (const senderId of senderIds)
-    await ensureMemberFromConversation(state, group.id, senderId, workspace);
   // Recover legacy rosters as visible joined members, without sending a wake.
   await materializeRoster(state, group, ["all"], workspace);
   saveState(root, state);
@@ -409,8 +413,13 @@ async function sendGroupMessage(args) {
   const group = groupFor(state, String(args.group_id), workspace);
   const content = String(args.content ?? "").trim();
   if (!content) throw new Error("content is empty");
-  if (conversationId)
-    await ensureMemberFromConversation(state, group.id, conversationId, workspace);
+  if (
+    conversationId &&
+    !state.members.some(
+      (member) => member.group_id === group.id && member.conversation_id === conversationId,
+    )
+  )
+    throw new Error("Conversation is not a member of this chat group");
   const user = !conversationId;
   const requested = Array.isArray(args.mentions) ? args.mentions.map(String) : [];
   const namedMentions = user
