@@ -27,6 +27,11 @@ the frame receives no bridge credential or conversation transcript. Drafts are
 kept per group while switching the picker and live locale/theme changes preserve
 input. Failed requests keep the draft and expose Refresh for retry.
 Older hosts without `tool_calls` support show an update-required message.
+The sidebar follows the desktop group-panel layout: a compact title and message
+count, collapsible outlined member pills, consecutive messages grouped under a
+sticky speaker heading, and an inset Mica composer with an arrow Send button.
+Light and dark colors match the application's conversation surface. The message
+list reserves space below its final row so the floating composer cannot hide it.
 No package-state migration is required. Existing `PLUGIN_DATA/chat-groups.json`
 remains the source of truth. Install this package directory again to activate its
 new sidebar entry; source changes do not update an already installed copy.

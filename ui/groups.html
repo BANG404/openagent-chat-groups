@@ -11,22 +11,29 @@
       :root {
         color-scheme: light;
         --bg: #fff;
-        --fg: #252525;
-        --muted: #737373;
-        --line: #e5e5e5;
-        --soft: #f5f5f5;
-        --accent: #2563eb;
+        --fg: #1d1d1f;
+        --muted: #6e6e73;
+        --line: #d8d8df;
+        --soft: #f0f0f5;
+        --accent: #0066cc;
         --danger: #b42318;
+        --mica: rgba(255, 255, 255, 0.62);
+        --composer-border: rgba(110, 110, 115, 0.14);
+        --composer-shadow: inset 0 1px 0 #ffffffad, 0 1px 2px #1f233014, 0 3px 8px #1f23301f;
+        --hover: color-mix(in srgb, var(--fg) 8%, transparent);
       }
       :root[data-theme="dark"] {
         color-scheme: dark;
-        --bg: #191919;
-        --fg: #eee;
-        --muted: #aaa;
-        --line: #383838;
-        --soft: #242424;
-        --accent: #8ab4ff;
-        --danger: #ff9b91;
+        --bg: #282c34;
+        --fg: #e2e8f0;
+        --muted: #8892a4;
+        --line: #454a55;
+        --soft: #27272a;
+        --accent: #2997ff;
+        --danger: #ff6961;
+        --mica: rgba(36, 36, 36, 0.64);
+        --composer-border: rgba(255, 255, 255, 0.1);
+        --composer-shadow: inset 0 1px 0 #ffffff14, 0 1px 2px #0000004d, 0 3px 8px #00000052;
       }
       * {
         box-sizing: border-box;
@@ -34,7 +41,10 @@
       body {
         margin: 0;
         font:
-          13px/1.55 system-ui,
+          14px/1.6 system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Inter",
           sans-serif;
         color: var(--fg);
         background: var(--bg);
@@ -43,7 +53,7 @@
         height: 100dvh;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 7px;
         padding: 12px;
       }
       button,
@@ -60,10 +70,10 @@
         border-radius: 8px;
         padding: 6px 10px;
         color: inherit;
-        background: var(--bg);
+        background: transparent;
       }
       button:hover {
-        background: var(--soft);
+        background: var(--hover);
       }
       button:disabled {
         opacity: 0.5;
@@ -76,32 +86,94 @@
       .toolbar {
         display: flex;
         gap: 8px;
-        align-items: start;
+        align-items: center;
       }
-      #picker {
+      .group-heading-copy {
         flex: 1;
         min-width: 0;
+      }
+      #picker {
         position: relative;
       }
       summary {
-        padding: 6px 8px;
-        border-radius: 8px;
-        background: var(--soft);
-        overflow-wrap: anywhere;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        list-style: none;
+        padding: 2px 0;
+        background: transparent;
+      }
+      summary::-webkit-details-marker {
+        display: none;
+      }
+      summary::after {
+        content: "";
+        flex-shrink: 0;
+        width: 6px;
+        height: 6px;
+        margin-right: 4px;
+        border-right: 1.5px solid var(--muted);
+        border-bottom: 1.5px solid var(--muted);
+        transform: rotate(-45deg);
+        transition: transform 120ms ease;
+      }
+      details[open] > summary::after {
+        transform: rotate(45deg);
+      }
+      #group-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+        font-weight: 700;
+      }
+      #message-count {
+        display: block;
+        color: var(--muted);
+        font-size: 10px;
+      }
+      #refresh {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 0;
+        color: var(--muted);
+      }
+      button svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
       }
       #choices {
         position: absolute;
         top: 100%;
         left: 0;
         right: 0;
-        z-index: 2;
-        padding: 4px;
+        z-index: 5;
+        padding: 6px;
         max-height: 220px;
         overflow: auto;
         background: var(--bg);
         border: 1px solid var(--line);
-        border-radius: 8px;
-        box-shadow: 0 6px 16px #0002;
+        border-radius: 18px;
+        box-shadow: var(--composer-shadow);
       }
       #choices button {
         display: block;
@@ -110,57 +182,103 @@
         border: 0;
       }
       #members {
-        border-bottom: 1px solid var(--line);
-        padding-bottom: 8px;
+        flex-shrink: 0;
       }
       #members summary {
         background: transparent;
-        padding: 0;
+        padding: 2px 0;
         color: var(--muted);
+        font-size: 12px;
       }
       #member-list {
         display: flex;
         flex-wrap: wrap;
         gap: 5px;
-        margin-top: 8px;
+        margin-top: 6px;
       }
       #member-list button {
         font-size: 12px;
         padding: 3px 7px;
+        border-radius: 999px;
+        color: var(--muted);
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      #messages {
+      .message-stack {
+        position: relative;
         flex: 1;
         min-height: 0;
+      }
+      #messages {
+        position: absolute;
+        inset: 0;
         overflow: auto;
+        overflow-x: hidden;
+        padding: 0 8px 112px 0;
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
+      }
+      #messages:hover,
+      #messages:focus-within {
+        scrollbar-color: var(--line) transparent;
+      }
+      .message-group {
+        min-width: 0;
+        margin-top: 26px;
+      }
+      .message-group:first-of-type {
+        margin-top: 0;
+      }
+      .speaker-divider {
+        position: sticky;
+        top: 0;
+        z-index: 1;
         display: flex;
-        flex-direction: column;
-        gap: 14px;
-        padding: 4px 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 0 -4px 8px;
+        padding: 6px 4px 7px;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+        background: var(--bg);
+      }
+      .speaker-divider strong {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg);
+        font-size: 17px;
+        font-weight: 650;
+        line-height: 1.25;
+      }
+      .speaker-divider strong::first-letter {
+        font-size: 1.35em;
+        font-weight: 700;
+      }
+      .speaker-divider time {
+        color: var(--muted);
+        font-size: 10px;
+        white-space: nowrap;
       }
       article {
-        flex-shrink: 0;
+        padding: 3px 4px;
       }
-      article header {
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-        color: var(--muted);
-        font-size: 11px;
-      }
-      article strong {
-        color: var(--fg);
-        font-weight: 600;
+      article:first-of-type {
+        padding-top: 0;
       }
       article p {
-        margin: 4px 0 0;
+        margin: 3px 0 0;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
       #empty {
-        margin: auto;
-        text-align: center;
+        margin: 0;
         color: var(--muted);
-        padding: 20px 8px;
+        font-size: 12px;
       }
       #error {
         color: var(--danger);
@@ -173,71 +291,114 @@
       #skeleton {
         display: flex;
         flex-direction: column;
-        gap: 18px;
+        gap: 26px;
       }
       .skeleton-row {
-        height: 54px;
-        background: var(--soft);
-        border-radius: 8px;
+        height: 76px;
+        background:
+          linear-gradient(var(--soft), var(--soft)) 0 6px / 40% 20px no-repeat,
+          linear-gradient(var(--soft), var(--soft)) 0 42px / 100% 12px no-repeat,
+          linear-gradient(var(--soft), var(--soft)) 0 64px / 75% 12px no-repeat;
       }
       #composer {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        border-top: 1px solid var(--line);
-        padding-top: 10px;
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 3;
+        overflow: hidden;
+        border: 1px solid var(--composer-border);
+        border-radius: 18px;
+        background: var(--mica);
+        box-shadow: var(--composer-shadow);
+        backdrop-filter: blur(24px) saturate(1.08);
+      }
+      #composer:focus-within {
+        outline: 1px solid var(--accent);
       }
       textarea {
+        display: block;
         width: 100%;
         resize: none;
-        min-height: 72px;
+        height: 78px;
+        min-height: 64px;
         max-height: 160px;
-        padding: 9px;
+        padding: 12px 54px 12px 18px;
         color: inherit;
-        background: var(--bg);
-        border: 1px solid var(--line);
-        border-radius: 10px;
+        background: transparent;
+        border: 0;
+        outline: none;
+        font-size: 14px;
+        line-height: 1.47;
       }
-      .footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      #hint {
+      textarea::placeholder {
         color: var(--muted);
-        font-size: 11px;
       }
       #send {
-        color: var(--accent);
+        position: absolute;
+        bottom: 9px;
+        right: 9px;
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border: 0;
+        border-radius: 8px;
+        padding: 0;
+        background: var(--accent);
+        color: #fff;
+      }
+      #send:hover:not(:disabled) {
+        filter: brightness(0.9);
+      }
+      #send:disabled {
+        opacity: 0.25;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        summary::after {
+          transition: none;
+        }
       }
     </style>
   </head>
   <body>
     <main>
       <div class="toolbar">
-        <details id="picker">
-          <summary id="group-title"></summary>
-          <div id="choices"></div>
-        </details>
-        <button id="refresh" type="button"></button>
+        <div class="group-heading-copy">
+          <details id="picker">
+            <summary><span id="group-title"></span></summary>
+            <div id="choices"></div>
+          </details>
+          <span id="message-count"></span>
+        </div>
+        <button id="refresh" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M13 6a5 5 0 1 0 .3 3M13 2v4H9" /></svg
+          ><span id="refresh-label" class="sr-only"></span>
+        </button>
       </div>
       <details id="members">
         <summary id="member-title"></summary>
         <div id="member-list"></div>
       </details>
       <p id="error" role="alert" hidden></p>
-      <div id="messages" role="log" aria-live="polite">
-        <div id="skeleton" aria-busy="true">
-          <div class="skeleton-row"></div>
-          <div class="skeleton-row"></div>
-          <div class="skeleton-row"></div>
+      <div class="message-stack">
+        <div id="messages" role="log" aria-live="polite">
+          <div id="skeleton" aria-busy="true">
+            <div class="skeleton-row"></div>
+            <div class="skeleton-row"></div>
+            <div class="skeleton-row"></div>
+          </div>
+          <p id="empty" hidden></p>
         </div>
-        <p id="empty" hidden></p>
-      </div>
-      <div id="composer">
-        <textarea id="draft" rows="3" maxlength="16000"></textarea>
-        <div class="footer"><span id="hint"></span><button id="send" type="button"></button></div>
+        <div id="composer">
+          <textarea id="draft" rows="3" maxlength="16000" aria-describedby="hint"></textarea>
+          <span id="hint" class="sr-only"></span
+          ><button id="send" type="button">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12V4m-4 4 4-4 4 4" /></svg
+            ><span id="send-label" class="sr-only"></span>
+          </button>
+        </div>
       </div>
     </main>
     <script>
@@ -248,6 +409,7 @@
             choose: "Choose a group",
             refresh: "Refresh",
             members: "Members",
+            messageCount: "messages",
             empty: "No chat groups in this workspace. Ask the Agent to create a group.",
             noMessages: "No messages yet",
             placeholder: "Message the group; @name to notify a member",
@@ -265,6 +427,7 @@
             choose: "选择群组",
             refresh: "刷新",
             members: "成员",
+            messageCount: "条消息",
             empty: "当前工作区暂无群组，可以让智能体创建群组。",
             noMessages: "暂无消息",
             placeholder: "向群组发送消息，@名字可通知成员",
@@ -323,11 +486,19 @@
         function labels() {
           document.documentElement.lang = language();
           document.documentElement.dataset.theme = ctx?.theme === "dark" ? "dark" : "light";
-          $("refresh").textContent = t("refresh");
+          $("refresh-label").textContent = t("refresh");
+          $("refresh").title = t("refresh");
+          $("refresh").setAttribute("aria-label", t("refresh"));
           $("draft").placeholder = t("placeholder");
           $("draft").setAttribute("aria-label", t("placeholder"));
           $("hint").textContent = t("hint");
-          $("send").textContent = t(sending ? "sending" : "send");
+          $("send-label").textContent = t(sending ? "sending" : "send");
+          $("send").title = t(sending ? "sending" : "send");
+          $("send").setAttribute("aria-label", t(sending ? "sending" : "send"));
+          $("send").disabled = !selected || sending || !$("draft").value.trim();
+          $("message-count").textContent = selected
+            ? `${messages.length} ${t("messageCount")}`
+            : "";
           $("group-title").textContent =
             groups.find((g) => g.id === selected)?.title || t("choose");
           $("member-title").textContent = `${t("members")} (${members.length})`;
@@ -336,7 +507,9 @@
         function renderMessages() {
           const box = $("messages"),
             atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-          box.querySelectorAll("article").forEach((node) => node.remove());
+          box.querySelectorAll(".message-group").forEach((node) => node.remove());
+          let previousSender = null,
+            group = null;
           for (const message of messages) {
             const article = document.createElement("article");
             article.dataset.messageId = message.id;
@@ -344,19 +517,31 @@
               name = document.createElement("strong"),
               time = document.createElement("time"),
               content = document.createElement("p");
+            const sender = `${message.sender_type}:${message.sender_id || ""}`;
             name.textContent =
               message.sender_type === "user"
                 ? t("user")
-                : members.find((m) => m.conversation_id === message.sender_id)?.role_name ||
-                  t("unknown");
-            time.textContent = new Date(message.created_at).toLocaleTimeString(language(), {
+                : members.find((m) =>
+                    [m.conversation_id, m.id, m.branch_id].includes(message.sender_id),
+                  )?.role_name || t("unknown");
+            const date = new Date(message.created_at);
+            time.dateTime = date.toISOString();
+            time.textContent = date.toLocaleTimeString(language(), {
               hour: "2-digit",
               minute: "2-digit",
             });
             content.textContent = message.content;
             header.append(name, time);
-            article.append(header, content);
-            box.append(article);
+            if (sender !== previousSender) {
+              group = document.createElement("section");
+              group.className = "message-group";
+              header.className = "speaker-divider";
+              group.append(header);
+              box.append(group);
+              previousSender = sender;
+            }
+            article.append(content);
+            group.append(article);
           }
           $("empty").hidden = messages.length > 0;
           if (atBottom) box.scrollTop = box.scrollHeight;
@@ -374,6 +559,7 @@
               $("draft").value += `@${name} `;
               drafts.set(draftKey(), $("draft").value);
               $("draft").focus();
+              labels();
             };
             $("member-list").append(button);
           }
@@ -445,7 +631,6 @@
             $("error").hidden = true;
             labels();
             $("draft").disabled = !selected;
-            $("send").disabled = !selected || sending;
           } catch (error) {
             if (current === generation) fail(error);
           } finally {
@@ -505,7 +690,10 @@
           }
         });
         $("refresh").onclick = () => void refresh();
-        $("draft").oninput = () => drafts.set(draftKey(), $("draft").value);
+        $("draft").oninput = () => {
+          drafts.set(draftKey(), $("draft").value);
+          labels();
+        };
         $("draft").onkeydown = (event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
             event.preventDefault();
@@ -532,7 +720,6 @@
           } finally {
             sending = false;
             labels();
-            $("send").disabled = !selected;
           }
         }
         $("send").onclick = () => void sendMessage();
