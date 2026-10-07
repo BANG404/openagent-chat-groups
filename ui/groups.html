@@ -626,6 +626,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             choose: "Choose a group",
             refresh: "Refresh",
             members: "Members",
+            owner: "Group owner",
             messageCount: "messages",
             all: "All members",
             role: "Role",
@@ -647,6 +648,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             choose: "选择群组",
             refresh: "刷新",
             members: "成员",
+            owner: "群主",
             messageCount: "条消息",
             all: "所有成员",
             role: "角色",
@@ -678,6 +680,16 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           drafts = new Map();
         const language = () => (ctx?.locale?.startsWith("zh") ? "zh" : "en");
         const t = (key) => copy[language()][key];
+        const memberName = (member) =>
+          member?.member_type === "owner" && !member.role_id
+            ? t("owner")
+            : member?.role_name || t("unknown");
+        const memberLabel = (member) =>
+          member?.member_type === "owner" && member.role_id
+            ? `${memberName(member)} · ${t("owner")}`
+            : memberName(member);
+        const memberMention = (member) =>
+          member?.member_type === "owner" && !member.role_id ? "owner" : member.role_name;
         const draftKey = () => `${ctx?.workspace || ""}\u0000${selected || ""}`;
         const markdown = new marked.Marked({
           gfm: true,
@@ -778,7 +790,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           const query = match[1].toLocaleLowerCase();
           mentionItems = [
             { id: "all", role_name: "all", label: t("all") },
-            ...members.map((m) => ({ ...m, label: m.role_name })),
+            ...members.map((m) => ({ ...m, role_name: memberMention(m), label: memberLabel(m) })),
           ].filter((m) => `${m.role_name} ${m.label}`.toLocaleLowerCase().includes(query));
           mentionIndex = Math.min(mentionIndex, Math.max(0, mentionItems.length - 1));
           const palette = $("mention-palette");
@@ -904,9 +916,11 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             name.textContent =
               message.sender_type === "user"
                 ? t("user")
-                : members.find((m) =>
-                    [m.conversation_id, m.id, m.branch_id].includes(message.sender_id),
-                  )?.role_name || t("unknown");
+                : memberLabel(
+                    members.find((m) =>
+                      [m.conversation_id, m.id, m.branch_id].includes(message.sender_id),
+                    ),
+                  );
             const date = new Date(message.created_at);
             time.dateTime = date.toISOString();
             time.textContent = date.toLocaleTimeString(language(), {
@@ -934,9 +948,10 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           for (const member of members) {
             const button = document.createElement("button");
             button.type = "button";
-            button.textContent = member.role_name;
+            button.textContent = memberLabel(member);
+            button.dataset.memberType = member.member_type || "member";
             button.onclick = () => {
-              insertMention(member.role_name);
+              insertMention(memberMention(member));
             };
             $("member-list").append(button);
           }
@@ -983,6 +998,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
                 group_id: selected,
               });
               if (current !== generation) return;
+              const changedMembers = JSON.stringify(members) !== JSON.stringify(loadedMembers);
               members = loadedMembers;
               let changed = false;
               for (;;) {
@@ -1001,7 +1017,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
                 if (page.messages.length < 200) break;
               }
               renderMembers();
-              if (changed || !messages.length) renderMessages();
+              if (changed || changedMembers || !messages.length) renderMessages();
             } else {
               members = [];
               renderMembers();
@@ -1067,7 +1083,10 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             ctx = data;
             labels();
             if (changed || scopeChanged) void refresh();
-            else renderMessages();
+            else {
+              renderMembers();
+              renderMessages();
+            }
           }
         });
         $("refresh").onclick = () => void refresh();

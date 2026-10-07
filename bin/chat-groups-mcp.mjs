@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
-import { agent, context, conversation, event, locale as hostLocale, roles as hostRoles } from "./chat-groups-host.mjs";
+import {
+  agent,
+  context,
+  conversation,
+  event,
+  locale as hostLocale,
+  roles as hostRoles,
+} from "./chat-groups-host.mjs";
 import {
   appendMessage,
   dataRoot,
@@ -34,22 +41,37 @@ const TOOLS = [
   {
     name: "chat_group_start",
     description:
-      "Create a collaboration group and record its first message. Saved roles are kept as a wake roster and are materialized only when a later message targets them.",
+      "Create a group (or use group_id from chat_group_create), join the creator as owner, add saved roles and post the opening message. By default wake the selected roles to begin discussion. Set start_discussion=false to join without waking. Use exact saved role names or IDs; resolve or create roles before calling. Check returned members rather than claiming roster entries have joined.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["title", "content"],
       properties: {
         title: { type: "string" },
-        roles: { type: "array", items: { type: "string" } },
+        group_id: {
+          type: "string",
+          description: "Reuse an existing group instead of creating another one.",
+        },
+        roles: {
+          type: "array",
+          items: { type: "string" },
+          description: "Exact saved role names or IDs to join.",
+        },
+        start_discussion: { type: "boolean", default: true },
         content: { type: "string" },
       },
     },
   },
   {
     name: "chat_group_create",
-    description: "Create a durable collaboration group without sending a message.",
-    inputSchema: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string" } } },
+    description:
+      "Create a durable group and join the calling conversation as group owner, without sending a message. Use the returned id as group_id when calling chat_group_start for this group.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["title"],
+      properties: { title: { type: "string" } },
+    },
   },
   {
     name: "chat_group_add_member",
@@ -69,12 +91,17 @@ const TOOLS = [
   {
     name: "chat_group_list_members",
     description: "List conversations currently joined to a collaboration group.",
-    inputSchema: { type: "object", additionalProperties: false, required: ["group_id"], properties: { group_id: { type: "string" } } },
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["group_id"],
+      properties: { group_id: { type: "string" } },
+    },
   },
   {
     name: "chat_group_send_message",
     description:
-      "Record a group message. Agent messages wake only member ids in mentions; the special all value wakes every other member. User messages also resolve @role names.",
+      "Record a group message. Agent messages wake only explicit mentions (member IDs, exact role names, owner/群主 or all); textual @names alone do not wake agents. User messages also resolve @names. The sender is never woken by its own message.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -116,7 +143,9 @@ const TOOLS = [
 function runMutation(fn) {
   const previous = mutation;
   let release;
-  mutation = new Promise((resolve) => { release = resolve; });
+  mutation = new Promise((resolve) => {
+    release = resolve;
+  });
   return previous.then(fn).finally(() => release());
 }
 
@@ -130,7 +159,9 @@ async function roles(workspace) {
 
 async function roleByName(name, workspace) {
   const wanted = String(name).trim().toLocaleLowerCase();
-  return (await roles(workspace)).find((role) => String(role.name ?? "").toLocaleLowerCase() === wanted);
+  return (await roles(workspace)).find(
+    (role) => String(role.name ?? "").toLocaleLowerCase() === wanted,
+  );
 }
 
 async function roleById(id, workspace) {
@@ -138,12 +169,24 @@ async function roleById(id, workspace) {
 }
 
 async function ensureMemberFromConversation(state, groupId, conversationId, workspace) {
-  let member = state.members.find((candidate) => candidate.group_id === groupId && candidate.conversation_id === conversationId);
+  let member = state.members.find(
+    (candidate) => candidate.group_id === groupId && candidate.conversation_id === conversationId,
+  );
   if (member) return member;
   const detail = await conversation.state(conversationId);
-  if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
+  if (detail.workspace !== workspace)
+    throw new Error("Conversation is outside the current workspace");
   const role = detail.role_id ? await roleById(detail.role_id, workspace) : null;
-  member = newMember(groupId, conversationId, detail.role_id ?? null, role?.name ?? detail.title ?? "role", detail.branch_id ?? null);
+  const owner =
+    state.groups.find((group) => group.id === groupId)?.owner_conversation_id === conversationId;
+  member = newMember(
+    groupId,
+    conversationId,
+    detail.role_id ?? null,
+    role?.name ?? (owner ? "Group owner" : "Agent"),
+    detail.branch_id ?? null,
+    owner ? "owner" : "member",
+  );
   state.members.push(member);
   return member;
 }
@@ -152,42 +195,78 @@ async function materializeRoster(state, group, requested, workspace) {
   const roster = state.rosters[group.id] ?? [];
   const wanted = requested.includes("all") ? roster.map((item) => item.role_name) : requested;
   for (const name of wanted) {
-    const role = roster.find((item) => item.role_name.toLocaleLowerCase() === String(name).toLocaleLowerCase());
+    const role = roster.find(
+      (item) => item.role_name.toLocaleLowerCase() === String(name).toLocaleLowerCase(),
+    );
     if (!role) continue;
-    if (state.members.some((member) => member.group_id === group.id && member.role_id === role.role_id)) continue;
+    if (
+      state.members.some(
+        (member) => member.group_id === group.id && member.role_id === role.role_id,
+      )
+    )
+      continue;
     const created = await conversation.create({
       title: `${group.title}: ${role.role_name}`,
       workspace,
       parentConvId: group.id,
       roleId: role.role_id,
     });
-    state.members.push(newMember(group.id, created.conv_id, role.role_id, role.role_name, created.branch_id));
+    state.members.push(
+      newMember(group.id, created.conv_id, role.role_id, role.role_name, created.branch_id),
+    );
+    // Persist each successful creation before another host operation can fail.
+    saveState(root, state);
   }
 }
 
 function resolveMentions(state, group, requested, userContent) {
   const members = membersFor(state, group.id);
   const result = [];
-  const push = (id) => { if (!result.includes(id)) result.push(id); };
+  const push = (id) => {
+    if (!result.includes(id)) result.push(id);
+  };
   for (const value of requested) {
     if (value === "all") {
       for (const member of members) push(member.id);
     } else if (members.some((member) => member.id === value)) {
       push(value);
     } else {
-      const byName = members.find((member) => member.role_name.toLocaleLowerCase() === String(value).toLocaleLowerCase());
+      const byName = members.find((member) => matchesMember(member, value));
       if (byName) push(byName.id);
     }
   }
   if (userContent) {
     for (const match of userContent.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)) {
       const name = (match[1] ?? match[2] ?? "").trim().toLocaleLowerCase();
-      if (name === "all") { for (const member of members) push(member.id); continue; }
-      const member = members.find((item) => item.role_name.toLocaleLowerCase() === name);
+      if (name === "all") {
+        for (const member of members) push(member.id);
+        continue;
+      }
+      const member = members.find((item) => matchesMember(item, name));
       if (member) push(member.id);
     }
   }
   return result;
+}
+
+function matchesMember(member, name) {
+  const wanted = String(name).trim().toLocaleLowerCase();
+  return (
+    (member.member_type === "owner" && ["owner", "群主", "group owner"].includes(wanted)) ||
+    member.role_name.toLocaleLowerCase() === wanted
+  );
+}
+
+async function presentMembers(state, groupId, args) {
+  const locale = await requestLocale(args, { locale: hostLocale });
+  return membersFor(state, groupId).map((member) => ({
+    ...member,
+    ...(!member.role_id && member.role_name === "Group owner"
+      ? { role_name: noticeText("notice.memberOwner", {}, locale) }
+      : !member.role_id && member.role_name === "Agent"
+        ? { role_name: noticeText("notice.memberAgent", {}, locale) }
+        : {}),
+  }));
 }
 
 async function ensureBranch(member) {
@@ -211,7 +290,8 @@ function wakePrompt(group, message) {
 async function wakeMember(group, message, member, attempt = 0) {
   const branchId = await ensureBranch(member);
   try {
-    await agent.wake({
+    await agent.wake(
+      {
         convId: member.conversation_id,
         branchId,
         text: wakePrompt(group, message),
@@ -224,7 +304,9 @@ async function wakeMember(group, message, member, attempt = 0) {
         model_binding: null,
         user_message_id: null,
         assistant_message_id: null,
-    }, { wait: false, hidden: true });
+      },
+      { wait: false, hidden: true },
+    );
   } catch (error) {
     const text = String(error?.message ?? error);
     if (text.includes("already active for this conversation") && attempt < 5) {
@@ -241,12 +323,14 @@ async function wakeMember(group, message, member, attempt = 0) {
 }
 
 async function createGroup(args) {
-  const { workspace } = context(args);
+  const { workspace, conversationId } = context(args);
   const title = String(args.title ?? "").trim();
   if (!title) throw new Error("title is empty");
   const state = loadState(root);
-  const group = newGroup(workspace, title);
+  const group = newGroup(workspace, title, conversationId || null);
   state.groups.push(group);
+  if (conversationId)
+    await ensureMemberFromConversation(state, group.id, conversationId, workspace);
   saveState(root, state);
   emit("chat-group-updated", group);
   return group;
@@ -265,25 +349,54 @@ async function addMember(args) {
   const state = loadState(root);
   const group = groupFor(state, String(args.group_id), workspace);
   const detail = await conversation.state(String(args.conversation_id));
-  if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
-  const role = args.role_id ? await roleById(args.role_id, workspace) : null;
-  const existing = state.members.find((member) => member.group_id === group.id && member.conversation_id === detail.conv_id);
-  const member = existing ?? newMember(group.id, detail.conv_id, args.role_id ?? detail.role_id ?? null, String(args.role_name ?? role?.name ?? detail.title ?? "role"), detail.branch_id ?? null);
+  if (detail.workspace !== workspace)
+    throw new Error("Conversation is outside the current workspace");
+  const roleId = args.role_id ?? detail.role_id;
+  const role = roleId ? await roleById(roleId, workspace) : null;
+  if (args.role_id && !role) throw new Error(`Unknown role '${args.role_id}'`);
+  const existing = state.members.find(
+    (member) => member.group_id === group.id && member.conversation_id === detail.conv_id,
+  );
+  const owner = group.owner_conversation_id === detail.conv_id;
+  const member =
+    existing ??
+    newMember(
+      group.id,
+      detail.conv_id,
+      args.role_id ?? detail.role_id ?? null,
+      String(owner && !detail.role_id ? "Group owner" : (args.role_name ?? role?.name ?? "Agent")),
+      detail.branch_id ?? null,
+      owner ? "owner" : "member",
+    );
   if (!existing) state.members.push(member);
   else Object.assign(existing, member);
   saveState(root, state);
   emit("chat-group-member-changed", member);
-  return member;
+  return (await presentMembers(state, group.id, args)).find((item) => item.id === member.id);
 }
 
 async function listMembers(args) {
   const { workspace } = context(args);
   const state = loadState(root);
   const group = groupFor(state, String(args.group_id), workspace);
-  const senderIds = new Set(state.messages.filter((message) => message.group_id === group.id && message.sender_type === "conversation" && message.sender_id).map((message) => message.sender_id));
-  for (const senderId of senderIds) await ensureMemberFromConversation(state, group.id, senderId, workspace);
+  if (group.owner_conversation_id)
+    await ensureMemberFromConversation(state, group.id, group.owner_conversation_id, workspace);
+  const senderIds = new Set(
+    state.messages
+      .filter(
+        (message) =>
+          message.group_id === group.id &&
+          message.sender_type === "conversation" &&
+          message.sender_id,
+      )
+      .map((message) => message.sender_id),
+  );
+  for (const senderId of senderIds)
+    await ensureMemberFromConversation(state, group.id, senderId, workspace);
+  // Recover legacy rosters as visible joined members, without sending a wake.
+  await materializeRoster(state, group, ["all"], workspace);
   saveState(root, state);
-  return membersFor(state, group.id);
+  return presentMembers(state, group.id, args);
 }
 
 async function sendGroupMessage(args) {
@@ -292,15 +405,21 @@ async function sendGroupMessage(args) {
   const group = groupFor(state, String(args.group_id), workspace);
   const content = String(args.content ?? "").trim();
   if (!content) throw new Error("content is empty");
-  if (conversationId) await ensureMemberFromConversation(state, group.id, conversationId, workspace);
+  if (conversationId)
+    await ensureMemberFromConversation(state, group.id, conversationId, workspace);
   const user = !conversationId;
   const requested = Array.isArray(args.mentions) ? args.mentions.map(String) : [];
   const namedMentions = user
-    ? [...content.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)].map((match) => match[1] ?? match[2])
+    ? [...content.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)].map(
+        (match) => match[1] ?? match[2],
+      )
     : [];
   await materializeRoster(state, group, [...requested, ...namedMentions], workspace);
   const mentions = resolveMentions(state, group, requested, user ? content : "");
-  const message = appendMessage(state, newMessage(group.id, user ? "user" : "conversation", conversationId, content, mentions));
+  const message = appendMessage(
+    state,
+    newMessage(group.id, user ? "user" : "conversation", conversationId, content, mentions),
+  );
   saveState(root, state);
   emit("chat-group-message", message);
   const members = membersFor(state, group.id);
@@ -333,19 +452,61 @@ async function startGroup(args) {
   const title = String(args.title ?? "").trim();
   const content = String(args.content ?? "").trim();
   if (!title || !content) throw new Error("title and content are required");
-  const roleNames = [...new Set((Array.isArray(args.roles) ? args.roles : []).map((name) => String(name).trim()).filter(Boolean))];
+  if (args.start_discussion !== undefined && typeof args.start_discussion !== "boolean")
+    throw new Error("start_discussion must be a boolean");
+  if (
+    args.roles !== undefined &&
+    (!Array.isArray(args.roles) ||
+      args.roles.some((name) => typeof name !== "string" || !name.trim()))
+  )
+    throw new Error("roles must contain non-empty saved role names or IDs");
+  const roleNames = [...new Set((args.roles ?? []).map((name) => name.trim()))];
   const available = await roles(workspace);
-  const roster = roleNames.map((name) => {
-    const role = available.find((item) => String(item.name ?? "").toLocaleLowerCase() === name.toLocaleLowerCase());
+  const resolved = roleNames.map((name) => {
+    const role = available.find(
+      (item) =>
+        item.id === name ||
+        String(item.name ?? "").toLocaleLowerCase() === name.toLocaleLowerCase(),
+    );
     if (!role) throw new Error(`Unknown role '${name}'`);
     return { role_id: role.id, role_name: role.name };
   });
-  const group = await createGroup({ ...args, title, _openagent: args._openagent });
+  const roster = resolved.filter(
+    (item, index) => resolved.findIndex((other) => other.role_id === item.role_id) === index,
+  );
+  const group = args.group_id
+    ? groupFor(loadState(root), String(args.group_id), workspace)
+    : await createGroup({ ...args, title, _openagent: args._openagent });
   const state = loadState(root);
-  state.rosters[group.id] = roster;
+  const previous = state.rosters[group.id] ?? [];
+  state.rosters[group.id] = [
+    ...previous,
+    ...roster.filter((item) => !previous.some((old) => old.role_id === item.role_id)),
+  ];
   saveState(root, state);
-  const message = await sendGroupMessage({ ...args, group_id: group.id, content, mentions: [], _openagent: args._openagent });
-  return { group, members: await listMembers({ group_id: group.id, _openagent: args._openagent }), message };
+  try {
+    await materializeRoster(state, group, ["all"], workspace);
+  } catch {
+    throw new Error(`Group '${group.id}' was saved; retry with group_id to finish adding roles`);
+  }
+  const targets = args.roles === undefined ? state.rosters[group.id] : roster;
+  const message = await sendGroupMessage({
+    ...args,
+    group_id: group.id,
+    content,
+    mentions: args.start_discussion === false ? [] : targets.map((item) => item.role_name),
+    _openagent: args._openagent,
+  });
+  const members = await listMembers({ group_id: group.id, _openagent: args._openagent });
+  const senderId = context(args).conversationId;
+  return {
+    group: groupFor(loadState(root), group.id, workspace),
+    members,
+    message,
+    discussion_started: members.some(
+      (member) => message.mentions.includes(member.id) && member.conversation_id !== senderId,
+    ),
+  };
 }
 
 async function sendPrivate(args) {
@@ -354,20 +515,21 @@ async function sendPrivate(args) {
   const content = String(args.content ?? "").trim();
   if (!conversationId || !content) throw new Error("conversation_id and content are required");
   const detail = await conversation.state(conversationId);
-  if (detail.workspace !== workspace) throw new Error("Conversation is outside the current workspace");
+  if (detail.workspace !== workspace)
+    throw new Error("Conversation is outside the current workspace");
   await agent.submit({
-      convId: conversationId,
-      branchId: detail.branch_id ?? null,
-      text: content,
-      // The generic bridge resolves the current branch head at submission
-      // time, so private messages cannot fork from a stale state snapshot.
-      parent_checkpoint_id: null,
-      attachments: [],
-      contexts: [],
-      model_binding: null,
-      user_message_id: null,
-      assistant_message_id: null,
-    });
+    convId: conversationId,
+    branchId: detail.branch_id ?? null,
+    text: content,
+    // The generic bridge resolves the current branch head at submission
+    // time, so private messages cannot fork from a stale state snapshot.
+    parent_checkpoint_id: null,
+    attachments: [],
+    contexts: [],
+    model_binding: null,
+    user_message_id: null,
+    assistant_message_id: null,
+  });
   return { conversation_id: conversationId, accepted: true };
 }
 
@@ -385,14 +547,19 @@ async function callTool(name, args) {
   });
 }
 
-function send(message) { process.stdout.write(`${JSON.stringify(message)}\n`); }
+function send(message) {
+  process.stdout.write(`${JSON.stringify(message)}\n`);
+}
 function methodNotFound(id, method) {
-  const respond = (locale) => send({
-    jsonrpc: "2.0",
-    id,
-    error: { code: -32601, message: noticeText("notice.methodMissing", { method }, locale) },
-  });
-  void requestLocale({}, { locale: hostLocale }).then(respond).catch(() => respond(defaultLocale));
+  const respond = (locale) =>
+    send({
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32601, message: noticeText("notice.methodMissing", { method }, locale) },
+    });
+  void requestLocale({}, { locale: hostLocale })
+    .then(respond)
+    .catch(() => respond(defaultLocale));
 }
 function reply(id, value, isError = false) {
   send({
@@ -408,19 +575,37 @@ function reply(id, value, isError = false) {
 function handle(message) {
   const { id, method, params } = message;
   if (method === "initialize") {
-    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.1.3" } } });
+    send({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION,
+        capabilities: { tools: {} },
+        serverInfo: { name: "chat-groups", version: "2.0.0" },
+      },
+    });
     return;
   }
   if (method === "notifications/initialized") return;
-  if (method === "ping") { send({ jsonrpc: "2.0", id, result: {} }); return; }
-  if (method === "tools/list") { send({ jsonrpc: "2.0", id, result: { tools: TOOLS } }); return; }
+  if (method === "ping") {
+    send({ jsonrpc: "2.0", id, result: {} });
+    return;
+  }
+  if (method === "tools/list") {
+    send({ jsonrpc: "2.0", id, result: { tools: TOOLS } });
+    return;
+  }
   if (method === "tools/call") {
     const args = params?.arguments ?? {};
-    callTool(params?.name, args).then((value) => reply(id, value)).catch(async (error) => {
-      let requestedLocale = defaultLocale;
-      try { requestedLocale = await requestLocale(args, { locale: hostLocale }); } catch {}
-      reply(id, errorNotice(error, requestedLocale), true);
-    });
+    callTool(params?.name, args)
+      .then((value) => reply(id, value))
+      .catch(async (error) => {
+        let requestedLocale = defaultLocale;
+        try {
+          requestedLocale = await requestLocale(args, { locale: hostLocale });
+        } catch {}
+        reply(id, errorNotice(error, requestedLocale), true);
+      });
     return;
   }
   if (id !== undefined) methodNotFound(id, method);
@@ -435,9 +620,13 @@ process.stdin.on("data", (chunk) => {
     const line = buffer.slice(0, index).trim();
     buffer = buffer.slice(index + 1);
     if (line) {
-      try { handle(JSON.parse(line)); } catch (error) {
+      try {
+        handle(JSON.parse(line));
+      } catch (error) {
         void requestLocale({}, { locale: hostLocale })
-          .then((requestedLocale) => process.stderr.write(`${errorNotice(error, requestedLocale)}\n`))
+          .then((requestedLocale) =>
+            process.stderr.write(`${errorNotice(error, requestedLocale)}\n`),
+          )
           .catch(() => process.stderr.write(`${errorNotice(error, defaultLocale)}\n`));
       }
     }

@@ -1,8 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  constants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
-const EMPTY = { groups: [], members: [], messages: [], rosters: {} };
+const EMPTY = { version: 2, groups: [], members: [], messages: [], rosters: {} };
 
 export function dataRoot() {
   const root = String(process.env.PLUGIN_DATA ?? "").trim();
@@ -18,37 +27,88 @@ function stateFile(root) {
 export function loadState(root) {
   const file = stateFile(root);
   if (!existsSync(file)) return structuredClone(EMPTY);
+  let value;
   try {
-    const value = JSON.parse(readFileSync(file, "utf8"));
-    return normalize(value);
+    value = JSON.parse(readFileSync(file, "utf8"));
   } catch {
-    return structuredClone(EMPTY);
+    throw new Error("Chat Groups data could not be read");
   }
+  return normalize(value);
 }
 
 export function saveState(root, state) {
   const file = stateFile(root);
+  const normalized = normalize(state);
+  if (existsSync(file)) {
+    const existing = JSON.parse(readFileSync(file, "utf8"));
+    normalize(existing);
+    if (existing.version === undefined) {
+      const backup = `${file}.v1.bak`;
+      if (existsSync(backup)) {
+        if (!statSync(backup).isFile()) throw new Error("Chat Groups backup could not be saved");
+      } else {
+        try {
+          copyFileSync(file, backup, constants.COPYFILE_EXCL);
+        } catch {
+          throw new Error("Chat Groups backup could not be saved");
+        }
+      }
+    }
+  }
   const temporary = `${file}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(normalize(state), null, 2)}\n`, "utf8");
+  writeFileSync(temporary, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
   renameSync(temporary, file);
 }
 
 export function normalize(value) {
-  const source = value && typeof value === "object" ? value : {};
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !["groups", "members", "messages"].every((key) => Array.isArray(value[key])) ||
+    (value.rosters !== undefined &&
+      (!value.rosters || typeof value.rosters !== "object" || Array.isArray(value.rosters)))
+  ) {
+    throw new Error("Chat Groups data could not be read");
+  }
+  if (value.version !== undefined && value.version !== 2) {
+    throw new Error(`Unsupported Chat Groups data version '${value.version}'`);
+  }
+  const state = structuredClone({ ...value, version: 2, rosters: value.rosters ?? {} });
+  for (const group of state.groups) {
+    if (value.version === undefined && group.owner_conversation_id === undefined) {
+      const first = messagesFor(state, group.id, 0, 1)[0];
+      group.owner_conversation_id = first?.sender_type === "conversation" ? first.sender_id : null;
+    }
+    for (const member of state.members.filter((item) => item.group_id === group.id)) {
+      member.member_type =
+        group.owner_conversation_id === member.conversation_id ? "owner" : "member";
+      if (member.member_type === "owner" && !member.role_id) member.role_name = "Group owner";
+    }
+  }
+  return state;
+}
+
+export function newGroup(workspace, title, ownerConversationId = null) {
+  const now = Date.now();
   return {
-    groups: Array.isArray(source.groups) ? source.groups : [],
-    members: Array.isArray(source.members) ? source.members : [],
-    messages: Array.isArray(source.messages) ? source.messages : [],
-    rosters: source.rosters && typeof source.rosters === "object" ? source.rosters : {},
+    id: randomUUID(),
+    workspace,
+    title,
+    owner_conversation_id: ownerConversationId,
+    created_at: now,
+    updated_at: now,
   };
 }
 
-export function newGroup(workspace, title) {
-  const now = Date.now();
-  return { id: randomUUID(), workspace, title, created_at: now, updated_at: now };
-}
-
-export function newMember(groupId, conversationId, roleId, roleName, branchId = null) {
+export function newMember(
+  groupId,
+  conversationId,
+  roleId,
+  roleName,
+  branchId = null,
+  memberType = "member",
+) {
   return {
     id: randomUUID(),
     group_id: groupId,
@@ -56,6 +116,7 @@ export function newMember(groupId, conversationId, roleId, roleName, branchId = 
     branch_id: branchId,
     role_id: roleId ?? null,
     role_name: roleName || "role",
+    member_type: memberType,
     joined_at: Date.now(),
   };
 }
@@ -85,7 +146,12 @@ export function groupFor(state, groupId, workspace) {
 export function membersFor(state, groupId) {
   return state.members
     .filter((member) => member.group_id === groupId)
-    .sort((a, b) => a.joined_at - b.joined_at || a.id.localeCompare(b.id));
+    .sort(
+      (a, b) =>
+        Number(b.member_type === "owner") - Number(a.member_type === "owner") ||
+        a.joined_at - b.joined_at ||
+        a.id.localeCompare(b.id),
+    );
 }
 
 export function messagesFor(state, groupId, fromSeq = 0, limit = 50) {

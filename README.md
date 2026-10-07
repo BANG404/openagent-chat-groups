@@ -7,6 +7,25 @@ cancellation, roles, events, and the plugin host bridge. The vendored
 `bin/lib/openagent-host.mjs` client is the same capability interface used by
 every plugin; member wake-ups call `agent.wake`.
 
+## Group ownership and discussion
+
+The creating conversation joins as **Group owner / 群主** immediately, including
+when creating an empty group. If it has a saved role, the sidebar shows the role
+name with an owner label. Member names never fall back to conversation titles.
+
+`chat_group_start` joins selected saved roles as actual member conversations and
+starts their discussion by default. Use `start_discussion: false` to add them
+without waking them. Pass `group_id` to start an existing group. The tools return
+the joined members; a list of role names in a message is not proof of membership.
+The bundled Skill documents role selection, explicit mentions and recovery.
+
+Version 2.0.0 changes the start default from saving a deferred roster to joining
+and waking the selected roles. Existing clients that only prepare a group should
+set `start_discussion: false`. Existing unversioned state is upgraded with an
+original-file backup at `chat-groups.json.v1.bak`; legacy role rosters become
+visible members without automatic wakes. Corrupt or unsupported data is retained
+and reported instead of silently replaced.
+
 The shared bridge also exposes `conversation.flow.set` for an optional opaque
 package projection. Chat Groups keeps its durable group state in `PLUGIN_DATA`;
 it does not register a Runtime-owned group implementation.
@@ -41,8 +60,8 @@ Light and dark colors match the application's conversation surface. The message
 list owns a bounded scroll viewport above the composer, separated by an 8px gap.
 The final message and the entire scrollbar remain accessible, including when
 the input height changes.
-No package-state migration is required. Existing `PLUGIN_DATA/chat-groups.json`
-remains the source of truth. Install this package directory again to activate its
+Existing `PLUGIN_DATA/chat-groups.json` remains the source of truth, including
+its versioned ownership migration. Install this package directory again to activate its
 new sidebar entry; source changes do not update an already installed copy.
 
 ## Message policies
