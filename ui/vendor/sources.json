@@ -1,0 +1,16 @@
+[
+  {
+    "file": "marked-16.4.2.js",
+    "version": "16.4.2",
+    "source": "https://github.com/markedjs/marked/tree/v16.4.2",
+    "license": "marked-LICENSE.md",
+    "sha256": "2e20e86f0a13107ae9bf00675894bbb573716a8e5b4fde612eacaff1e404c128"
+  },
+  {
+    "file": "dompurify-3.4.15.js",
+    "version": "3.4.15",
+    "source": "https://github.com/cure53/DOMPurify/tree/3.4.15",
+    "license": "dompurify-LICENSE.txt",
+    "sha256": "f263b05369e050fa175d4ecb9c9358eb4253602d510297adfb31df48b2f1c4d5"
+  }
+]

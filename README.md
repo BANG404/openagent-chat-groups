@@ -20,8 +20,15 @@ update flow.
 The workspace-scoped `groups` sidebar reads the package's existing MCP tools
 through the version-1 sidebar tool bridge. It lists saved groups, members and
 paginated messages, polls for new messages, and sends user messages with optional
-`@role` mentions. Member buttons insert mentions. Plain text is rendered with
-preserved line breaks; message content never becomes executable HTML.
+`@role` mentions. Typing `@` opens a member palette above the composer; typing
+filters roles, arrows select, Enter/Tab insert, and Escape dismisses. `@all`
+selects all members. IME composition never selects or sends, and choosing an
+item replaces only the mention at the caret. Member buttons insert mentions too.
+Messages render GFM Markdown (headings, emphasis, lists, quotes, tables, fenced
+code and links) with preserved line breaks. Raw HTML stays visible text; unsafe
+URL schemes and executable markup are excluded. External HTTP(S) links use the
+optional host opener instead of navigating the panel. Images show their alt
+text; the panel does not fetch network resources.
 The application selects the owning package and supplies workspace and locale;
 the frame receives no bridge credential or conversation transcript. Drafts are
 kept per group while switching the picker and live locale/theme changes preserve
@@ -54,6 +61,18 @@ feedback, and operational notices follow that language. Group IDs, role names,
 conversation content, and stored messages keep their original values.
 
 ## Development
+
+The single HTML sidebar embeds pinned Marked and DOMPurify browser bundles.
+Their source versions, SHA-256 digests and licenses live in `ui/vendor/`.
+After changing a vendor, update its provenance and regenerate the inline slot:
+
+```bash
+bun scripts/embed-sidebar-vendors.mjs
+bun scripts/embed-sidebar-vendors.mjs --check
+```
+
+Keep the vendor slot's `prettier-ignore` directives so embedding stays byte
+deterministic. The sidebar is network-free and does not load external scripts.
 
 Validate the package with the validator from
 an [OpenAgent Plugin Kit](https://github.com/BANG404/openagent-plugin-kit)

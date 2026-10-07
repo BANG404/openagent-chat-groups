@@ -1,0 +1,2 @@
+# Preserve the upstream bytes used by vendor SHA-256 provenance.
+ui/vendor/*.js -text
