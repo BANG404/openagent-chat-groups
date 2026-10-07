@@ -15,6 +15,22 @@ Install the package from this repository through **Settings -> Plugins ->
 Install**, or subscribe to its GitHub repository through the ordinary plugin
 update flow.
 
+## Group sidebar
+
+The workspace-scoped `groups` sidebar reads the package's existing MCP tools
+through the version-1 sidebar tool bridge. It lists saved groups, members and
+paginated messages, polls for new messages, and sends user messages with optional
+`@role` mentions. Member buttons insert mentions. Plain text is rendered with
+preserved line breaks; message content never becomes executable HTML.
+The application selects the owning package and supplies workspace and locale;
+the frame receives no bridge credential or conversation transcript. Drafts are
+kept per group while switching the picker and live locale/theme changes preserve
+input. Failed requests keep the draft and expose Refresh for retry.
+Older hosts without `tool_calls` support show an update-required message.
+No package-state migration is required. Existing `PLUGIN_DATA/chat-groups.json`
+remains the source of truth. Install this package directory again to activate its
+new sidebar entry; source changes do not update an already installed copy.
+
 ## Message policies
 
 This package declares none. The Runtime keeps the `chat_group_mention` entry

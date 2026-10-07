@@ -182,6 +182,7 @@ function resolveMentions(state, group, requested, userContent) {
   if (userContent) {
     for (const match of userContent.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)) {
       const name = (match[1] ?? match[2] ?? "").trim().toLocaleLowerCase();
+      if (name === "all") { for (const member of members) push(member.id); continue; }
       const member = members.find((item) => item.role_name.toLocaleLowerCase() === name);
       if (member) push(member.id);
     }
@@ -294,8 +295,10 @@ async function sendGroupMessage(args) {
   if (conversationId) await ensureMemberFromConversation(state, group.id, conversationId, workspace);
   const user = !conversationId;
   const requested = Array.isArray(args.mentions) ? args.mentions.map(String) : [];
-  const targets = resolveMentions(state, group, requested, user ? content : "");
-  await materializeRoster(state, group, targets, workspace);
+  const namedMentions = user
+    ? [...content.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)].map((match) => match[1] ?? match[2])
+    : [];
+  await materializeRoster(state, group, [...requested, ...namedMentions], workspace);
   const mentions = resolveMentions(state, group, requested, user ? content : "");
   const message = appendMessage(state, newMessage(group.id, user ? "user" : "conversation", conversationId, content, mentions));
   saveState(root, state);
@@ -405,7 +408,7 @@ function reply(id, value, isError = false) {
 function handle(message) {
   const { id, method, params } = message;
   if (method === "initialize") {
-    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.0.4" } } });
+    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.1.0" } } });
     return;
   }
   if (method === "notifications/initialized") return;

@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #fff;
+        --fg: #252525;
+        --muted: #737373;
+        --line: #e5e5e5;
+        --soft: #f5f5f5;
+        --accent: #2563eb;
+        --danger: #b42318;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #191919;
+        --fg: #eee;
+        --muted: #aaa;
+        --line: #383838;
+        --soft: #242424;
+        --accent: #8ab4ff;
+        --danger: #ff9b91;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font:
+          13px/1.55 system-ui,
+          sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      main {
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px;
+      }
+      button,
+      textarea,
+      summary {
+        font: inherit;
+      }
+      button,
+      summary {
+        cursor: pointer;
+      }
+      button {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 10px;
+        color: inherit;
+        background: var(--bg);
+      }
+      button:hover {
+        background: var(--soft);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: start;
+      }
+      #picker {
+        flex: 1;
+        min-width: 0;
+        position: relative;
+      }
+      summary {
+        padding: 6px 8px;
+        border-radius: 8px;
+        background: var(--soft);
+        overflow-wrap: anywhere;
+      }
+      #choices {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 2;
+        padding: 4px;
+        max-height: 220px;
+        overflow: auto;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 6px 16px #0002;
+      }
+      #choices button {
+        display: block;
+        text-align: start;
+        width: 100%;
+        border: 0;
+      }
+      #members {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 8px;
+      }
+      #members summary {
+        background: transparent;
+        padding: 0;
+        color: var(--muted);
+      }
+      #member-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 8px;
+      }
+      #member-list button {
+        font-size: 12px;
+        padding: 3px 7px;
+      }
+      #messages {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 4px 0;
+      }
+      article {
+        flex-shrink: 0;
+      }
+      article header {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      article strong {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      article p {
+        margin: 4px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #empty {
+        margin: auto;
+        text-align: center;
+        color: var(--muted);
+        padding: 20px 8px;
+      }
+      #error {
+        color: var(--danger);
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      #skeleton {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .skeleton-row {
+        height: 54px;
+        background: var(--soft);
+        border-radius: 8px;
+      }
+      #composer {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+      textarea {
+        width: 100%;
+        resize: none;
+        min-height: 72px;
+        max-height: 160px;
+        padding: 9px;
+        color: inherit;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      .footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      #hint {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      #send {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="toolbar">
+        <details id="picker">
+          <summary id="group-title"></summary>
+          <div id="choices"></div>
+        </details>
+        <button id="refresh" type="button"></button>
+      </div>
+      <details id="members">
+        <summary id="member-title"></summary>
+        <div id="member-list"></div>
+      </details>
+      <p id="error" role="alert" hidden></p>
+      <div id="messages" role="log" aria-live="polite">
+        <div id="skeleton" aria-busy="true">
+          <div class="skeleton-row"></div>
+          <div class="skeleton-row"></div>
+          <div class="skeleton-row"></div>
+        </div>
+        <p id="empty" hidden></p>
+      </div>
+      <div id="composer">
+        <textarea id="draft" rows="3" maxlength="16000"></textarea>
+        <div class="footer"><span id="hint"></span><button id="send" type="button"></button></div>
+      </div>
+    </main>
+    <script>
+      (() => {
+        const $ = (id) => document.getElementById(id);
+        const copy = {
+          en: {
+            choose: "Choose a group",
+            refresh: "Refresh",
+            members: "Members",
+            empty: "No chat groups in this workspace. Ask the Agent to create a group.",
+            noMessages: "No messages yet",
+            placeholder: "Message the group; @name to notify a member",
+            hint: "Enter to send · Shift+Enter for a new line",
+            send: "Send",
+            sending: "Sending…",
+            user: "You",
+            unknown: "Agent",
+            unsupported:
+              "This OpenAgent version does not support sidebar tools. Update the application.",
+            failed: "Unable to load group messages. Use Refresh to retry.",
+            timeout: "The group request timed out. Refresh to check its status.",
+          },
+          zh: {
+            choose: "选择群组",
+            refresh: "刷新",
+            members: "成员",
+            empty: "当前工作区暂无群组，可以让智能体创建群组。",
+            noMessages: "暂无消息",
+            placeholder: "向群组发送消息，@名字可通知成员",
+            hint: "Enter 发送 · Shift+Enter 换行",
+            send: "发送",
+            sending: "发送中…",
+            user: "你",
+            unknown: "智能体",
+            unsupported: "当前 OpenAgent 版本不支持侧栏工具，请更新应用。",
+            failed: "无法加载群组消息，请点击刷新重试。",
+            timeout: "群组请求超时，请刷新确认状态。",
+          },
+        };
+        let ctx = null,
+          generation = 0,
+          serial = 0,
+          groups = [],
+          members = [],
+          messages = [],
+          selected = null,
+          nextSeq = 0,
+          sending = false,
+          refreshing = false;
+        const pending = new Map(),
+          drafts = new Map();
+        const language = () => (ctx?.locale?.startsWith("zh") ? "zh" : "en");
+        const t = (key) => copy[language()][key];
+        const draftKey = () => `${ctx?.workspace || ""}\u0000${selected || ""}`;
+        function fail(error) {
+          $("error").textContent = String(error?.message || error || t("failed"));
+          $("error").hidden = false;
+        }
+        function request(tool_name, args = {}) {
+          if (!ctx?.tool_calls) return Promise.reject(new Error(t("unsupported")));
+          const request_id = String(++serial),
+            scope = ctx.scope;
+          return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              pending.delete(request_id);
+              reject(new Error(t("timeout")));
+            }, 25000);
+            pending.set(request_id, { resolve, reject, timeout, scope });
+            parent.postMessage(
+              {
+                type: "openagent:sidebar-tool-call",
+                version: 1,
+                request_id,
+                scope,
+                tool_name,
+                arguments: args,
+              },
+              "*",
+            );
+          });
+        }
+        function labels() {
+          document.documentElement.lang = language();
+          document.documentElement.dataset.theme = ctx?.theme === "dark" ? "dark" : "light";
+          $("refresh").textContent = t("refresh");
+          $("draft").placeholder = t("placeholder");
+          $("draft").setAttribute("aria-label", t("placeholder"));
+          $("hint").textContent = t("hint");
+          $("send").textContent = t(sending ? "sending" : "send");
+          $("group-title").textContent =
+            groups.find((g) => g.id === selected)?.title || t("choose");
+          $("member-title").textContent = `${t("members")} (${members.length})`;
+          $("empty").textContent = t(groups.length ? "noMessages" : "empty");
+        }
+        function renderMessages() {
+          const box = $("messages"),
+            atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+          box.querySelectorAll("article").forEach((node) => node.remove());
+          for (const message of messages) {
+            const article = document.createElement("article");
+            article.dataset.messageId = message.id;
+            const header = document.createElement("header"),
+              name = document.createElement("strong"),
+              time = document.createElement("time"),
+              content = document.createElement("p");
+            name.textContent =
+              message.sender_type === "user"
+                ? t("user")
+                : members.find((m) => m.conversation_id === message.sender_id)?.role_name ||
+                  t("unknown");
+            time.textContent = new Date(message.created_at).toLocaleTimeString(language(), {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            content.textContent = message.content;
+            header.append(name, time);
+            article.append(header, content);
+            box.append(article);
+          }
+          $("empty").hidden = messages.length > 0;
+          if (atBottom) box.scrollTop = box.scrollHeight;
+        }
+        function renderMembers() {
+          $("member-list").replaceChildren();
+          for (const member of members) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = member.role_name;
+            button.onclick = () => {
+              const name = /^[\p{L}\p{N}_-]+$/u.test(member.role_name)
+                ? member.role_name
+                : `"${member.role_name.replaceAll('"', "")}"`;
+              $("draft").value += `@${name} `;
+              drafts.set(draftKey(), $("draft").value);
+              $("draft").focus();
+            };
+            $("member-list").append(button);
+          }
+        }
+        async function selectGroup(id) {
+          drafts.set(draftKey(), $("draft").value);
+          selected = id;
+          messages = [];
+          members = [];
+          nextSeq = 0;
+          $("draft").value = drafts.get(draftKey()) || "";
+          $("picker").open = false;
+          ++generation;
+          labels();
+          renderMembers();
+          renderMessages();
+          await refresh();
+        }
+        async function refresh() {
+          if (refreshing) return;
+          refreshing = true;
+          const current = generation;
+          try {
+            const loaded = await request("chat_group_list");
+            if (current !== generation) return;
+            groups = loaded;
+            if (!groups.some((g) => g.id === selected)) {
+              selected = groups[0]?.id || null;
+              messages = [];
+              nextSeq = 0;
+              $("draft").value = drafts.get(draftKey()) || "";
+            }
+            $("choices").replaceChildren();
+            for (const group of groups) {
+              const button = document.createElement("button");
+              button.textContent = group.title;
+              button.onclick = () => void selectGroup(group.id);
+              $("choices").append(button);
+            }
+            if (selected) {
+              const loadedMembers = await request("chat_group_list_members", {
+                group_id: selected,
+              });
+              if (current !== generation) return;
+              members = loadedMembers;
+              let changed = false;
+              for (;;) {
+                const page = await request("chat_group_read_messages", {
+                  group_id: selected,
+                  from_seq: nextSeq,
+                  limit: 200,
+                  wait_secs: 0,
+                });
+                if (current !== generation) return;
+                if (page.messages.length) {
+                  messages.push(...page.messages);
+                  nextSeq = page.next_seq;
+                  changed = true;
+                }
+                if (page.messages.length < 200) break;
+              }
+              renderMembers();
+              if (changed || !messages.length) renderMessages();
+            } else {
+              members = [];
+              renderMembers();
+              renderMessages();
+            }
+            $("error").hidden = true;
+            labels();
+            $("draft").disabled = !selected;
+            $("send").disabled = !selected || sending;
+          } catch (error) {
+            if (current === generation) fail(error);
+          } finally {
+            refreshing = false;
+            if (current === generation) $("skeleton").hidden = true;
+            else void refresh();
+          }
+        }
+        window.addEventListener("message", (event) => {
+          if (event.source !== parent || event.data?.version !== 1) return;
+          const data = event.data;
+          if (data.type === "openagent:sidebar-tool-result") {
+            const wait = pending.get(data.request_id);
+            if (!wait || wait.scope !== data.scope) return;
+            clearTimeout(wait.timeout);
+            pending.delete(data.request_id);
+            if (!data.ok) {
+              wait.reject(new Error(data.error));
+              return;
+            }
+            const result = data.result;
+            if (result?.isError) {
+              wait.reject(new Error(result.content?.map((c) => c.text || "").join("\n")));
+              return;
+            }
+            try {
+              wait.resolve(JSON.parse(result.content.find((c) => c.type === "text").text));
+            } catch (error) {
+              wait.reject(error);
+            }
+          }
+          if (data.type === "openagent:sidebar-context") {
+            const changed = !ctx || ctx.workspace !== data.workspace;
+            const scopeChanged = ctx && ctx.scope !== data.scope;
+            if (changed || scopeChanged) {
+              if (ctx) drafts.set(draftKey(), $("draft").value);
+              ++generation;
+              if (changed) {
+                groups = [];
+                members = [];
+                messages = [];
+                selected = null;
+                nextSeq = 0;
+              }
+              for (const wait of pending.values()) {
+                clearTimeout(wait.timeout);
+                wait.reject(new Error("Scope changed"));
+              }
+              pending.clear();
+              if (changed) $("draft").value = "";
+              $("skeleton").hidden = false;
+            }
+            ctx = data;
+            labels();
+            if (changed || scopeChanged) void refresh();
+            else renderMessages();
+          }
+        });
+        $("refresh").onclick = () => void refresh();
+        $("draft").oninput = () => drafts.set(draftKey(), $("draft").value);
+        $("draft").onkeydown = (event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            void sendMessage();
+          }
+        };
+        async function sendMessage() {
+          const content = $("draft").value.trim();
+          if (!content || !selected || sending) return;
+          const current = generation,
+            key = draftKey();
+          sending = true;
+          labels();
+          $("send").disabled = true;
+          try {
+            await request("chat_group_send_message", { group_id: selected, content });
+            drafts.delete(key);
+            if (current === generation) {
+              if ($("draft").value.trim() === content) $("draft").value = "";
+              await refresh();
+            }
+          } catch (error) {
+            if (current === generation) fail(error);
+          } finally {
+            sending = false;
+            labels();
+            $("send").disabled = !selected;
+          }
+        }
+        $("send").onclick = () => void sendMessage();
+        labels();
+        $("draft").disabled = true;
+        $("send").disabled = true;
+        setInterval(() => {
+          if (ctx && !document.hidden) void refresh();
+        }, 2500);
+        parent.postMessage({ type: "openagent:sidebar-ready", version: 1 }, "*");
+      })();
+    </script>
+  </body>
+</html>
