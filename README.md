@@ -51,9 +51,9 @@ drafts per group. Branch switches keep the same conversation's group selection.
 An unrelated conversation shows an empty state instead of another group's messages.
 The input stays disabled until the selected group's members and messages load.
 `chat_group_list` accepts an optional `conversation_id` filter; omission preserves
-workspace-wide listing. New groups record their creating conversation without
-adding it as a member. Existing member and Agent-message associations continue
-to work without rewriting stored data.
+workspace-wide listing. New groups record their creating conversation and join
+it as the group owner. Existing creator, member and Agent-message associations
+remain available through the ownership upgrade.
 Messages render GFM Markdown (headings, emphasis, lists, quotes, tables, fenced
 code and links) with preserved line breaks. Raw HTML stays visible text; unsafe
 URL schemes and executable markup are excluded. External HTTP(S) links use the
