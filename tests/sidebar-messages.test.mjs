@@ -71,6 +71,11 @@ test("a user sidebar mention materializes a saved role and wakes that member", a
     expect(message.mentions).toEqual([stored.members[0].id]);
     for (let attempt = 0; attempt < 100 && !wakes.length; attempt++) await Bun.sleep(10);
     expect(wakes).toHaveLength(1);
+    expect(wakes[0].hidden).toBe(true);
+    expect(wakes[0].wait).toBe(false);
+    expect(wakes[0].text).toContain(message.content);
+    expect(wakes[0].conv_id).toBe("new-member");
+    expect(wakes[0].parent_checkpoint_id).toBeNull();
   } finally {
     child.kill();
     await new Promise((resolve) => child.once("close", resolve));

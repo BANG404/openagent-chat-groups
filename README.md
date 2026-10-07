@@ -38,12 +38,21 @@ The sidebar follows the desktop group-panel layout: a compact title and message
 count, collapsible outlined member pills, consecutive messages grouped under a
 sticky speaker heading, and an inset Mica composer with an arrow Send button.
 Light and dark colors match the application's conversation surface. The message
-list reserves space below its final row so the floating composer cannot hide it.
+list owns a bounded scroll viewport above the composer, separated by an 8px gap.
+The final message and the entire scrollbar remain accessible, including when
+the input height changes.
 No package-state migration is required. Existing `PLUGIN_DATA/chat-groups.json`
 remains the source of truth. Install this package directory again to activate its
 new sidebar entry; source changes do not update an already installed copy.
 
 ## Message policies
+
+Member wake-ups use the authenticated bridge's `hidden: true` option. Runtime
+retains the user-role prompt as model-visible checkpoint data under
+`plugin:chat-groups:control`, while live and restored transcripts omit it and
+keep the Agent reply. Ordinary group messages and explicit `chat_send_message`
+submissions remain visible. This applies to new wakes; existing untagged user
+records keep their original visibility.
 
 This package declares none. The Runtime keeps the `chat_group_mention` entry
 only for legacy checkpoint compatibility; new Chat Groups events use the

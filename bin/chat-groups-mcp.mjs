@@ -224,7 +224,7 @@ async function wakeMember(group, message, member, attempt = 0) {
         model_binding: null,
         user_message_id: null,
         assistant_message_id: null,
-    }, { wait: false });
+    }, { wait: false, hidden: true });
   } catch (error) {
     const text = String(error?.message ?? error);
     if (text.includes("already active for this conversation") && attempt < 5) {
@@ -408,7 +408,7 @@ function reply(id, value, isError = false) {
 function handle(message) {
   const { id, method, params } = message;
   if (method === "initialize") {
-    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.1.2" } } });
+    send({ jsonrpc: "2.0", id, result: { protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "chat-groups", version: "1.1.3" } } });
     return;
   }
   if (method === "notifications/initialized") return;

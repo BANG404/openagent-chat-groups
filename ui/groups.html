@@ -208,15 +208,17 @@
       }
       .message-stack {
         position: relative;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) auto;
+        gap: 8px;
         flex: 1;
         min-height: 0;
       }
       #messages {
-        position: absolute;
-        inset: 0;
+        min-height: 0;
         overflow: auto;
         overflow-x: hidden;
-        padding: 0 8px 112px 0;
+        padding: 0 8px 8px 0;
         scrollbar-width: thin;
         scrollbar-color: transparent transparent;
       }
@@ -426,10 +428,7 @@
           linear-gradient(var(--soft), var(--soft)) 0 64px / 75% 12px no-repeat;
       }
       #composer {
-        position: absolute;
-        right: 0;
-        bottom: 0;
-        left: 0;
+        position: relative;
         z-index: 3;
         overflow: hidden;
         border: 1px solid var(--composer-border);
