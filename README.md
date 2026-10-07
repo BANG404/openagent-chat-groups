@@ -59,6 +59,11 @@ code and links) with preserved line breaks. Raw HTML stays visible text; unsafe
 URL schemes and executable markup are excluded. External HTTP(S) links use the
 optional host opener instead of navigating the panel. Images show their alt
 text; the panel does not fetch network resources.
+The square Stop button beside Send terminates the selected group's member
+turns, including its owner. It keeps messages, membership and the draft, and
+prevents queued or late Agent messages from waking another member. Failed
+cancellations show a localized retry notice. A new user message or explicit
+`chat_group_start` resumes discussion.
 The application selects the owning package and supplies workspace and locale;
 the frame receives no bridge credential or conversation transcript. Drafts are
 kept per group while switching the picker and live locale/theme changes preserve
