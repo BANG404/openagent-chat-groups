@@ -64,6 +64,9 @@ turns, including its owner. It keeps messages, membership and the draft, and
 prevents queued or late Agent messages from waking another member. Failed
 cancellations show a localized retry notice. A new user message or explicit
 `chat_group_start` resumes discussion.
+After Stop, a user-triggered member turn records the new authored input visibly
+in that member conversation, respecting Runtime's block on hidden continuations
+restarting cancelled runs.
 The application selects the owning package and supplies workspace and locale;
 the frame receives no bridge credential or conversation transcript. Drafts are
 kept per group while switching the picker and live locale/theme changes preserve

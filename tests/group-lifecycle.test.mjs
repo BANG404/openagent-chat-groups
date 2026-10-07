@@ -222,8 +222,29 @@ test("Stop cancels the selected group's owner and members, preserving data and l
       { conversation_id: "" },
     );
     await f.waitWakes(3);
+    expect(f.wakes[2].hidden).toBe(false);
+    expect(f.wakes[2].text).toBe("@互联网产品经理 Continue");
     expect(loadState(f.root).groups.find((g) => g.id === started.group.id).discussion_stopped).toBe(
       false,
+    );
+    await f.ok("chat_group_stop", { group_id: started.group.id });
+    await f.ok("chat_group_start", {
+      group_id: started.group.id,
+      title: "News",
+      content: "Join only",
+      start_discussion: false,
+    });
+    expect(loadState(f.root).groups.find((g) => g.id === started.group.id).discussion_stopped).toBe(
+      true,
+    );
+    await f.ok("chat_group_start", {
+      group_id: started.group.id,
+      title: "News",
+      content: "Restart",
+    });
+    await f.waitWakes(5);
+    expect(f.wakes.slice(3).every((wake) => wake.hidden === false && wake.text === "Restart")).toBe(
+      true,
     );
   } finally {
     await f.close();
