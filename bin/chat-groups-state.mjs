@@ -78,7 +78,9 @@ export function normalize(value) {
   for (const group of state.groups) {
     if (value.version === undefined && group.owner_conversation_id === undefined) {
       const first = messagesFor(state, group.id, 0, 1)[0];
-      group.owner_conversation_id = first?.sender_type === "conversation" ? first.sender_id : null;
+      group.owner_conversation_id =
+        group.created_by_conversation_id ??
+        (first?.sender_type === "conversation" ? first.sender_id : null);
     }
     for (const member of state.members.filter((item) => item.group_id === group.id)) {
       member.member_type =
@@ -152,6 +154,25 @@ export function membersFor(state, groupId) {
         a.joined_at - b.joined_at ||
         a.id.localeCompare(b.id),
     );
+}
+
+export function groupsForConversation(state, conversationId) {
+  const related = new Set(
+    state.members
+      .filter((member) => member.conversation_id === conversationId)
+      .map((member) => member.group_id),
+  );
+  for (const message of state.messages) {
+    if (
+      ["conversation", "agent"].includes(message.sender_type) &&
+      message.sender_id === conversationId
+    ) {
+      related.add(message.group_id);
+    }
+  }
+  return state.groups.filter(
+    (group) => group.created_by_conversation_id === conversationId || related.has(group.id),
+  );
 }
 
 export function messagesFor(state, groupId, fromSeq = 0, limit = 50) {

@@ -47,8 +47,8 @@ participants publish substantive replies with `chat_group_send_message`.
 ## Data and verification
 
 State version 2 records `owner_conversation_id` and `member_type`. For an
-unversioned group, only a first message authored by a conversation establishes
-legacy ownership. Groups with no such evidence remain ownerless; do not guess
+unversioned group, its recorded creator establishes ownership; otherwise only
+a first message authored by a conversation establishes legacy ownership. Groups with no such evidence remain ownerless; do not guess
 from a title. Before the first persisted upgrade, preserve the original JSON
 as `chat-groups.json.v1.bak`. Migration preserves IDs, role bindings and history.
 Listing members materializes any legacy saved roster without waking it.

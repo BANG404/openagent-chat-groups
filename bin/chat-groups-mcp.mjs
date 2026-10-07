@@ -13,6 +13,7 @@ import {
   appendMessage,
   dataRoot,
   groupFor,
+  groupsForConversation,
   loadState,
   membersFor,
   memberFor,
@@ -31,11 +32,12 @@ let mutation = Promise.resolve();
 const TOOLS = [
   {
     name: "chat_group_list",
-    description: "List collaboration groups in the requested workspace.",
+    description:
+      "List collaboration groups in the requested workspace. Optionally filter by the conversation that created, joined or posted in a group.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: { workspace: { type: "string" } },
+      properties: { workspace: { type: "string" }, conversation_id: { type: "string" } },
     },
   },
   {
@@ -328,6 +330,7 @@ async function createGroup(args) {
   if (!title) throw new Error("title is empty");
   const state = loadState(root);
   const group = newGroup(workspace, title, conversationId || null);
+  if (conversationId) group.created_by_conversation_id = conversationId;
   state.groups.push(group);
   if (conversationId)
     await ensureMemberFromConversation(state, group.id, conversationId, workspace);
@@ -339,7 +342,8 @@ async function createGroup(args) {
 async function listGroups(args) {
   const { workspace } = context(args);
   const state = loadState(root);
-  return state.groups
+  const conversationId = String(args.conversation_id ?? "").trim();
+  return (conversationId ? groupsForConversation(state, conversationId) : state.groups)
     .filter((group) => !workspace || group.workspace === workspace)
     .sort((a, b) => b.updated_at - a.updated_at || b.id.localeCompare(a.id));
 }
