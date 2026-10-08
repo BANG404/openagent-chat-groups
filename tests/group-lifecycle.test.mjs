@@ -189,6 +189,32 @@ test("create immediately joins the creator as localized owner, with no conversat
   }
 });
 
+test("member running projection follows live phases without persisting activity", async () => {
+  const f = await fixture();
+  try {
+    const group = await f.ok("chat_group_create", { title: "Activity" });
+    const owner = f.conversations.get("creator");
+    for (const phase of [
+      null,
+      "before_completion",
+      "final_completed",
+      "final_cancelled",
+      "final_failed",
+      "interrupted",
+    ]) {
+      owner.phase = phase;
+      const members = await f.ok("chat_group_list_members", { group_id: group.id });
+      expect(members[0].running).toBe(phase === "before_completion");
+      expect(loadState(f.root).members[0]).not.toHaveProperty("running");
+    }
+    // A missing member conversation must not prevent history or roster loading.
+    f.conversations.delete("creator");
+    expect((await f.ok("chat_group_list_members", { group_id: group.id }))[0].running).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
 test("Stop cancels the selected group's owner and members, preserving data and later user wakes", async () => {
   const f = await fixture();
   try {

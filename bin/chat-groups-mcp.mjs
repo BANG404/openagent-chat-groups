@@ -280,14 +280,21 @@ function matchesMember(member, name) {
 
 async function presentMembers(state, groupId, args) {
   const locale = await requestLocale(args, { locale: hostLocale });
-  return membersFor(state, groupId).map((member) => ({
-    ...member,
-    ...(!member.role_id && member.role_name === "Group owner"
-      ? { role_name: noticeText("notice.memberOwner", {}, locale) }
-      : !member.role_id && member.role_name === "Agent"
-        ? { role_name: noticeText("notice.memberAgent", {}, locale) }
-        : {}),
-  }));
+  return Promise.all(
+    membersFor(state, groupId).map(async (member) => ({
+      ...member,
+      // Live presentation only: membership and the stopped flag do not prove a run.
+      running: await conversation
+        .state(member.conversation_id)
+        .then((detail) => detail?.phase === "before_completion")
+        .catch(() => false),
+      ...(!member.role_id && member.role_name === "Group owner"
+        ? { role_name: noticeText("notice.memberOwner", {}, locale) }
+        : !member.role_id && member.role_name === "Agent"
+          ? { role_name: noticeText("notice.memberAgent", {}, locale) }
+          : {}),
+    })),
+  );
 }
 
 async function ensureBranch(member) {

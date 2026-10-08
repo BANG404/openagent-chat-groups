@@ -50,6 +50,13 @@ participants publish substantive replies with `chat_group_send_message`.
 ## Stop a discussion
 
 The sidebar's square Stop button calls `chat_group_stop` for the selected group.
+It is hidden until a joined conversation reports `before_completion` through
+the shared `conversation.state` bridge. Member-list `running` is a transient
+projection, never persisted group state. Empty, join-only, completed, cancelled,
+failed and interrupted groups hide Stop; unreadable member state cannot make
+it visible. Polling follows turns started outside the sidebar too. Keep Stop
+visible but disabled during its own request, then hide it on success without
+changing the draft. Switching groups must discard the previous running state.
 It cancels every joined member conversation, including the owner, retains
 membership/history/drafts, and invalidates pending wake retries. Cancellation
 failures still attempt every member and return a localized retry notice.

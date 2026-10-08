@@ -538,7 +538,7 @@
             aria-controls="mention-palette"
             aria-expanded="false"
           ></textarea>
-          <button id="stop" type="button" disabled>
+          <button id="stop" type="button" disabled hidden>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" stroke="none" />
             </svg>
@@ -701,6 +701,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           nextSeq = 0,
           sending = false,
           stopping = false,
+          stoppingGroup = null,
           stopError = null,
           refreshing = false;
         const pending = new Map(),
@@ -923,8 +924,10 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           $("stop-label").textContent = t(stopping ? "stopping" : "stop");
           $("stop").title = t(stopping ? "stopping" : "stop");
           $("stop").setAttribute("aria-label", t(stopping ? "stopping" : "stop"));
+          const running = members.some((member) => member.running === true);
+          $("stop").hidden = !selected || !(running || (stopping && stoppingGroup === selected));
           $("stop").disabled =
-            !selected || sending || stopping || $("draft").disabled || !members.length;
+            !selected || sending || stopping || $("draft").disabled || !running;
           $("message-count").textContent = selected
             ? `${messages.length} ${t("messageCount")}`
             : "";
@@ -1241,11 +1244,15 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           if (!selected || sending || stopping || $("stop").disabled) return;
           const current = generation;
           stopping = true;
+          stoppingGroup = selected;
           stopError = null;
           labels();
           try {
             await request("chat_group_stop", { group_id: selected });
-            if (current === generation) $("error").hidden = true;
+            if (current === generation) {
+              members = members.map((member) => ({ ...member, running: false }));
+              $("error").hidden = true;
+            }
           } catch (error) {
             if (current === generation) {
               stopError = error;
@@ -1253,6 +1260,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
             }
           } finally {
             stopping = false;
+            stoppingGroup = null;
             labels();
           }
         }
