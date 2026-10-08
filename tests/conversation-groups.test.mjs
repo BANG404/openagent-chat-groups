@@ -3,7 +3,59 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { groupsForConversation, loadState, saveState } from "../bin/chat-groups-state.mjs";
+import {
+  groupsForConversation,
+  loadState,
+  membersFor,
+  saveState,
+} from "../bin/chat-groups-state.mjs";
+
+test("members joined in the same millisecond retain roster order after reload", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "chat-groups-order-"));
+  const state = {
+    version: 2,
+    groups: [{ id: "group", owner_conversation_id: "creator" }],
+    members: [
+      {
+        id: "z-product",
+        group_id: "group",
+        joined_at: 1,
+        member_type: "agent",
+      },
+      {
+        id: "a-developer",
+        group_id: "group",
+        joined_at: 1,
+        member_type: "agent",
+      },
+      {
+        id: "owner",
+        group_id: "group",
+        conversation_id: "creator",
+        joined_at: 2,
+        member_type: "owner",
+      },
+      { id: "later", group_id: "group", joined_at: 3, member_type: "agent" },
+      {
+        id: "unrelated",
+        group_id: "other",
+        joined_at: 0,
+        member_type: "agent",
+      },
+    ],
+    messages: [],
+    rosters: {},
+  };
+  try {
+    saveState(root, state);
+    expect(
+      membersFor(loadState(root), "group").map((member) => member.id),
+    ).toEqual(["owner", "z-product", "a-developer", "later"]);
+    expect(state.members[0].id).toBe("z-product");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("creator, member and persisted sender associations exclude unrelated groups", () => {
   const state = {

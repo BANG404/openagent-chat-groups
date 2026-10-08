@@ -151,8 +151,7 @@ export function membersFor(state, groupId) {
     .sort(
       (a, b) =>
         Number(b.member_type === "owner") - Number(a.member_type === "owner") ||
-        a.joined_at - b.joined_at ||
-        a.id.localeCompare(b.id),
+        a.joined_at - b.joined_at,
     );
 }
 

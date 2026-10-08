@@ -77,6 +77,10 @@ a first message authored by a conversation establishes legacy ownership. Groups 
 from a title. Before the first persisted upgrade, preserve the original JSON
 as `chat-groups.json.v1.bak`. Migration preserves IDs, role bindings and history.
 Listing members materializes any legacy saved roster without waking it.
+Member lists place the owner first, then order participants by join time. Equal
+timestamps retain persisted insertion order, so a roster joined within one
+millisecond stays in its selected role order across reloads. Random member IDs
+must not determine participant order.
 Unreadable, malformed or unsupported-version data fails without replacement.
 
 Run `bun test tests` and Plugin Kit's `validate-plugin.mjs` against the candidate.
