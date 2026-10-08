@@ -1250,6 +1250,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           try {
             await request("chat_group_stop", { group_id: selected });
             if (current === generation) {
+              ++generation;
               members = members.map((member) => ({ ...member, running: false }));
               $("error").hidden = true;
             }
