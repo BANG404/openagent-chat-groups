@@ -117,7 +117,7 @@ const TOOLS = [
   {
     name: "chat_group_send_message",
     description:
-      "Record a group message from an already joined member conversation; sending never joins another conversation. Agent messages wake only explicit mentions (member IDs, exact role names, owner/群主 or all); textual @names alone do not wake agents. User messages also resolve @names. The sender is never woken by its own message.",
+      'Record a group message from an already joined member conversation. Both Agent and user messages wake members named in the content with @role, @owner/@群主 or @all. Use exact role names; quote names containing spaces as @"Role Name". No separate mention parameter is needed. Sending never joins another conversation, and the sender is never woken by its own message.',
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -125,7 +125,6 @@ const TOOLS = [
       properties: {
         group_id: { type: "string" },
         content: { type: "string" },
-        mentions: { type: "array", items: { type: "string" } },
       },
     },
   },
@@ -248,31 +247,24 @@ async function materializeRoster(state, group, requested, workspace) {
   }
 }
 
-function resolveMentions(state, group, requested, userContent) {
+function mentionNames(content) {
+  return [...content.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)].map((match) =>
+    (match[1] ?? match[2]).trim().toLocaleLowerCase(),
+  );
+}
+
+function resolveMentions(state, group, names) {
   const members = membersFor(state, group.id);
   const result = [];
   const push = (id) => {
     if (!result.includes(id)) result.push(id);
   };
-  for (const value of requested) {
-    if (value === "all") {
+  for (const name of names) {
+    if (name === "all") {
       for (const member of members) push(member.id);
-    } else if (members.some((member) => member.id === value)) {
-      push(value);
     } else {
-      const byName = members.find((member) => matchesMember(member, value));
+      const byName = members.find((member) => matchesMember(member, name));
       if (byName) push(byName.id);
-    }
-  }
-  if (userContent) {
-    for (const match of userContent.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)) {
-      const name = (match[1] ?? match[2] ?? "").trim().toLocaleLowerCase();
-      if (name === "all") {
-        for (const member of members) push(member.id);
-        continue;
-      }
-      const member = members.find((item) => matchesMember(item, name));
-      if (member) push(member.id);
     }
   }
   return result;
@@ -311,6 +303,7 @@ function wakePrompt(group, message) {
     "Read the latest group messages with chat_group_read_messages when context is needed.",
     "If you have a substantive response, publish one concise reply with chat_group_send_message using this group_id before finishing. The private final answer is not visible in the group.",
     "Publish from this member conversation directly. If tools are relay-mounted, load plugin:chat-groups:chat-groups with load_tool. Do not spawn a child agent to send a group reply; Runtime child tasks are not group members.",
+    'To hand off or ask another member, include @ followed by their exact role name in the published content (quote names with spaces as @"Role Name"). Use @owner to return to the group owner. Content mentions wake members automatically; there is no separate mentions argument.',
     "Do not create another group or wake additional roles unless the message explicitly asks you to.",
     "",
     `Group message:\n${message.content}`,
@@ -459,7 +452,7 @@ async function listMembers(args) {
   return presentMembers(state, group.id, args);
 }
 
-async function sendGroupMessage(args, explicitStart = false) {
+async function sendGroupMessage(args, { explicitStart = false, wake = true } = {}) {
   const { conversationId, workspace } = context(args);
   const state = loadState(root);
   const group = groupFor(state, String(args.group_id), workspace);
@@ -477,14 +470,9 @@ async function sendGroupMessage(args, explicitStart = false) {
   // Cancellation blocks hidden continuations. Only explicit fresh input may
   // restart a stopped member, and its authored text remains visible there.
   const userRestart = (user || explicitStart) && (group.wake_epoch ?? 0) > 0;
-  const requested = Array.isArray(args.mentions) ? args.mentions.map(String) : [];
-  const namedMentions = user
-    ? [...content.matchAll(/@(?:"([^"]+)"|([\p{L}\p{N}_-]+))/gu)].map(
-        (match) => match[1] ?? match[2],
-      )
-    : [];
-  await materializeRoster(state, group, [...requested, ...namedMentions], workspace);
-  const mentions = resolveMentions(state, group, requested, user ? content : "");
+  const names = wake ? mentionNames(content) : [];
+  await materializeRoster(state, group, names, workspace);
+  const mentions = resolveMentions(state, group, names);
   const message = appendMessage(
     state,
     newMessage(group.id, user ? "user" : "conversation", conversationId, content, mentions),
@@ -559,15 +547,18 @@ async function startGroup(args) {
     throw new Error(`Group '${group.id}' was saved; retry with group_id to finish adding roles`);
   }
   const targets = args.roles === undefined ? state.rosters[group.id] : roster;
+  const wake = args.start_discussion !== false && targets.length > 0;
+  const opening = wake
+    ? `${content}\n\n${targets.map((item) => `@${JSON.stringify(item.role_name)}`).join(" ")}`
+    : content;
   const message = await sendGroupMessage(
     {
       ...args,
       group_id: group.id,
-      content,
-      mentions: args.start_discussion === false ? [] : targets.map((item) => item.role_name),
+      content: opening,
       _openagent: args._openagent,
     },
-    args.start_discussion !== false,
+    { explicitStart: args.start_discussion !== false, wake },
   );
   const members = await listMembers({ group_id: group.id, _openagent: args._openagent });
   const senderId = context(args).conversationId;
@@ -655,7 +646,7 @@ function handle(message) {
       result: {
         protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: "chat-groups", version: "2.1.0" },
+        serverInfo: { name: "chat-groups", version: "3.0.0" },
       },
     });
     return;

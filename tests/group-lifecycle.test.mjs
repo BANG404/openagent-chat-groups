@@ -92,7 +92,7 @@ async function fixture({
       pending.get(message.id)?.(message.result);
     }
   });
-  async function call(name, args = {}, context = {}) {
+  async function call(name, args = {}, context = {}, method = "tools/call") {
     const id = ++serial;
     const result = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -109,7 +109,7 @@ async function fixture({
       JSON.stringify({
         jsonrpc: "2.0",
         id,
-        method: "tools/call",
+        method,
         params: {
           name,
           arguments: {
@@ -215,7 +215,7 @@ test("Stop cancels the selected group's owner and members, preserving data and l
     expect(after.groups.find((g) => g.id === other.group.id).discussion_stopped).toBeUndefined();
     await f.ok(
       "chat_group_send_message",
-      { group_id: started.group.id, content: "Late reply", mentions: ["all"] },
+      { group_id: started.group.id, content: "@all Late reply" },
       { conversation_id: "child-0" },
     );
     await Bun.sleep(30);
@@ -241,15 +241,17 @@ test("Stop cancels the selected group's owner and members, preserving data and l
     expect(loadState(f.root).groups.find((g) => g.id === started.group.id).discussion_stopped).toBe(
       true,
     );
-    await f.ok("chat_group_start", {
+    const restarted = await f.ok("chat_group_start", {
       group_id: started.group.id,
       title: "News",
       content: "Restart",
     });
     await f.waitWakes(5);
-    expect(f.wakes.slice(3).every((wake) => wake.hidden === false && wake.text === "Restart")).toBe(
-      true,
-    );
+    expect(
+      f.wakes
+        .slice(3)
+        .every((wake) => wake.hidden === false && wake.text === restarted.message.content),
+    ).toBe(true);
   } finally {
     await f.close();
   }
@@ -370,7 +372,7 @@ test("start joins all selected roles and wakes them once; create then start reus
   }
 });
 
-test("join-only ignores textual Agent mentions; explicit owner mentions work across languages and never self-wake", async () => {
+test("join-only suppresses opening mentions; Agent role and owner mentions wake across languages without self-wakes", async () => {
   const f = await fixture();
   try {
     const started = await f.ok("chat_group_start", {
@@ -383,20 +385,128 @@ test("join-only ignores textual Agent mentions; explicit owner mentions work acr
     expect(started.message.mentions).toEqual([]);
     expect(started.discussion_started).toBe(false);
     const group_id = started.group.id;
-    await f.ok("chat_group_send_message", { group_id, content: "@互联网产品经理 欢迎" });
+    const reply = await f.ok("chat_group_send_message", {
+      group_id,
+      content: "@互联网产品经理：请接力。@互联网产品经理 再补充。@未知角色 请回复",
+    });
+    expect(reply.mentions).toEqual([started.members[1].id]);
+    await f.waitWakes(1);
+    expect(f.wakes[0].conv_id).toBe(started.members[1].conversation_id);
+    await f.ok("chat_group_send_message", { group_id, content: "@owner Reply" });
     await Bun.sleep(50);
-    expect(f.wakes).toHaveLength(0);
-    await f.ok("chat_group_send_message", { group_id, content: "Reply", mentions: ["owner"] });
-    await Bun.sleep(50);
-    expect(f.wakes).toHaveLength(0);
+    expect(f.wakes).toHaveLength(1);
+    const ownerReply = await f.ok(
+      "chat_group_send_message",
+      { group_id, content: "@owner 请整理纪要" },
+      { conversation_id: started.members[1].conversation_id, locale: "en" },
+    );
+    expect(ownerReply.mentions).toEqual([started.members[0].id]);
+    await f.waitWakes(2);
+    expect(f.wakes[1].conv_id).toBe("creator");
     const userMessage = await f.ok(
       "chat_group_send_message",
       { group_id, content: "@群主 请回复" },
       { conversation_id: "", locale: "en" },
     );
     expect(userMessage.mentions).toEqual([started.members[0].id]);
-    await f.waitWakes(1);
-    expect(f.wakes[0].conv_id).toBe("creator");
+    await f.waitWakes(3);
+    expect(f.wakes[2].conv_id).toBe("creator");
+  } finally {
+    await f.close();
+  }
+});
+
+test("group send exposes content mentions without a separate mentions parameter", async () => {
+  const f = await fixture();
+  try {
+    const { tools } = await f.call("", {}, {}, "tools/list");
+    const send = tools.find((tool) => tool.name === "chat_group_send_message");
+    expect(Object.keys(send.inputSchema.properties)).toEqual(["group_id", "content"]);
+    expect(send.inputSchema.additionalProperties).toBe(false);
+    expect(send.description).toContain("@role");
+  } finally {
+    await f.close();
+  }
+});
+
+test("Agent mentions support quoted role names, newlines and all with one wake per other member", async () => {
+  const f = await fixture();
+  try {
+    const started = await f.ok("chat_group_start", {
+      title: "News",
+      content: "Join",
+      roles: ["product", "developer"],
+      start_discussion: false,
+    });
+    const [owner, product, developer] = started.members;
+    f.conversations.set("english", {
+      conv_id: "english",
+      branch_id: "english-branch",
+      workspace: "workspace",
+    });
+    const english = await f.ok("chat_group_add_member", {
+      group_id: started.group.id,
+      conversation_id: "english",
+      role_name: "Market Analyst",
+    });
+    const message = await f.ok(
+      "chat_group_send_message",
+      {
+        group_id: started.group.id,
+        content:
+          '@"Market Analyst": please respond.\n@开发者生态观察员：请接力。\n@互联网产品经理额外字符 @Missing @"market analyst"',
+      },
+      { conversation_id: product.conversation_id },
+    );
+    expect(message.mentions).toEqual([english.id, developer.id]);
+    await f.waitWakes(2);
+    expect(f.wakes.map((w) => w.conv_id).sort()).toEqual(
+      ["english", developer.conversation_id].sort(),
+    );
+    const all = await f.ok(
+      "chat_group_send_message",
+      {
+        group_id: started.group.id,
+        content: "@all @ALL @互联网产品经理 @owner",
+      },
+      { conversation_id: product.conversation_id },
+    );
+    expect(all.mentions).toEqual([owner.id, product.id, developer.id, english.id]);
+    await f.waitWakes(5);
+    expect(
+      f.wakes
+        .slice(2)
+        .map((w) => w.conv_id)
+        .sort(),
+    ).toEqual(["creator", developer.conversation_id, "english"].sort());
+    expect(loadState(f.root).messages.at(-1).mentions).toEqual(all.mentions);
+    await f.ok("chat_group_send_message", { group_id: started.group.id, content: "No handoff" });
+    await Bun.sleep(50);
+    expect(f.wakes).toHaveLength(5);
+  } finally {
+    await f.close();
+  }
+});
+
+test("an explicitly empty start roster suppresses textual wake targets", async () => {
+  const f = await fixture();
+  try {
+    const joined = await f.ok("chat_group_start", {
+      title: "News",
+      content: "Join",
+      roles: ["product"],
+      start_discussion: false,
+    });
+    const started = await f.ok("chat_group_start", {
+      group_id: joined.group.id,
+      title: "News",
+      content: "@all wait",
+      roles: [],
+    });
+    expect(started.message.mentions).toEqual([]);
+    expect(started.discussion_started).toBe(false);
+    await Bun.sleep(50);
+    expect(f.wakes).toHaveLength(0);
   } finally {
     await f.close();
   }

@@ -35,11 +35,14 @@ an existing group with no `roles` field, its saved roster is selected. Explicit
 `roles: []` wakes nobody. Creation failures retain the group ID and successful
 members; retry with that `group_id`, which prevents duplicate conversations.
 
-Agent-authored messages require explicit `mentions` (member IDs, exact role
-names, `owner` / `群主`, or `all`) to wake participants. Listing `@names` in
-the content alone does not wake Agents. User sidebar messages resolve textual
-mentions too. A message never wakes its own sender. Use `@owner` for an unbound
+Agent and user messages wake participants through mentions in the published
+`content`: `@角色名`, `@owner` / `@群主`, or `@all`. Use exact saved role names;
+quote names containing spaces as `@"Market Analyst"`. There is no `mentions`
+input parameter. Repeated mentions wake each target once, unknown names are
+ignored, and a message never wakes its own sender. Use `@owner` for an unbound
 owner across language changes; a role-bound owner can also be mentioned by role.
+Start appends the selected roles as textual mentions to its opening message;
+join-only and explicitly empty-roster starts suppress all opening wakes.
 Check returned members and mention targets before reporting that participants
 joined or discussion started. A private final response is not a group reply;
 participants publish substantive replies with `chat_group_send_message`.

@@ -17,7 +17,11 @@ name with an owner label. Member names never fall back to conversation titles.
 starts their discussion by default. Use `start_discussion: false` to add them
 without waking them. Pass `group_id` to start an existing group. The tools return
 the joined members; a list of role names in a message is not proof of membership.
-The bundled Skill documents role selection, explicit mentions and recovery.
+The bundled Skill documents role selection, textual mentions and recovery.
+Both Agent and user messages hand off through `@role`, `@owner` / `@群主`, or
+`@all` in the published content. Quote names containing spaces as
+`@"Market Analyst"`. Version 3 removes the separate `mentions` tool parameter;
+stored messages retain their resolved member IDs for display and scheduling.
 Each participant is created through the standard conversation bridge with its
 saved role and the creating conversation as its parent. Runtime `spawn_agent`
 tasks are independent execution helpers: sending a message does not join them
