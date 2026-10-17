@@ -1,4 +1,6 @@
-# OpenAgent Chat Groups
+# Agent Group Chat
+
+Bring agents with different roles into a group discussion; mention a member to invite a reply.
 
 The standard Agent Plugin package for OpenAgent Chat Groups. The package carries
 its portable identity, Skill, MCP server, and package-owned group state. The

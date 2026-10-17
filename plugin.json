@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "chat-groups",
-  "version": "3.0.2",
-  "description": "Mention-aware group conversations for OpenAgent.",
+  "version": "3.0.3",
+  "description": "Bring agents with different roles into a group discussion; mention a member to invite a reply.",
   "license": "MIT",
   "repository": "https://github.com/BANG404/openagent-chat-groups",
   "keywords": ["openagent", "chat-groups", "conversation"],
@@ -13,7 +13,7 @@
       "sidebar": [
         {
           "id": "groups",
-          "title": "Chat Groups",
+          "title": "Agent Group Chat",
           "entry": "ui/groups.html",
           "scope": "workspace",
           "activation_tools": [
@@ -35,9 +35,9 @@
         "default_locale": "en",
         "translations": {
           "en": {
-            "display_name": "Chat Groups",
-            "sidebar.groups.title": "Chat Groups",
-            "description": "Mention-aware group conversations for OpenAgent.",
+            "display_name": "Agent Group Chat",
+            "sidebar.groups.title": "Agent Group Chat",
+            "description": "Bring agents with different roles into a group discussion; mention a member to invite a reply.",
             "notice.conversationWorkspace": "Conversation is outside the current workspace",
             "notice.titleEmpty": "title is empty",
             "notice.contentEmpty": "content is empty",
@@ -62,9 +62,9 @@
             "notice.stopFailed": "Could not stop {count} group member conversations; retry Stop"
           },
           "zh": {
-            "display_name": "聊天群组",
-            "sidebar.groups.title": "聊天群组",
-            "description": "支持提及成员的 OpenAgent 群组会话。",
+            "display_name": "多智能体群聊",
+            "sidebar.groups.title": "多智能体群聊",
+            "description": "让不同角色的智能体在群聊中讨论，通过 @成员 邀请指定成员回复。",
             "notice.conversationWorkspace": "该会话不属于当前工作区",
             "notice.titleEmpty": "标题不能为空",
             "notice.contentEmpty": "内容不能为空",
